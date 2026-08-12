@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workspace module — Compliance Checker</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="dashboard-hero">
+      <div>
+        <div class="dashboard-kicker" id="module-kicker">Workspace module</div>
+        <h1 id="module-title">Coming next</h1>
+        <p id="module-description">This workspace area is reserved for the next rebuild phase.</p>
+      </div>
+      <div class="dashboard-hero-action"><a class="btn" href="dashboard.html">Back to dashboard</a></div>
+    </div>
+    <div class="panel">
+      <div class="eyebrow">Phase 1 shell</div>
+      <h2 id="module-panel-title">Module foundation is ready.</h2>
+      <p style="max-width:62ch; color:var(--ink-soft);">The navigation and authenticated workspace structure are now in place. This module will receive its data views and actions in the next implementation phase.</p>
+      <div class="notice queue">Placeholder state: no production actions are available here yet.</div>
+    </div>
+  </div>
+  <script src="assets/config.js"></script>
+  <script type="module">
+    import { requireSession, wireTopbar } from "./assets/auth.js";
+    import { renderTopbar } from "./assets/topbar.js";
+
+    const labels = {
+      students: ["Students", "Applicant records", "Manage reusable student profiles and contact details."],
+      universities: ["Universities", "Reference data", "Manage institutions and their application requirements."],
+      countries: ["Countries", "Reference data", "Manage country-level compliance requirements."],
+      programmes: ["Programmes", "Reference data", "Manage programmes, levels, and programme-specific rules."],
+      "compliance-rules": ["Compliance rules", "Decision controls", "Configure the deterministic checks used by application reviews."],
+      reports: ["Reports", "Review outputs", "Generate and archive structured compliance reports."],
+      settings: ["Settings", "Workspace settings", "Manage workspace configuration and integrations."],
+    };
+    const key = new URLSearchParams(window.location.search).get("module") || "workspace";
+    const [title, kicker, description] = labels[key] || ["Workspace module", "Workspace module", "This workspace area is reserved for the next rebuild phase."];
+    document.title = `${title} — Compliance Checker`;
+    document.getElementById("module-title").textContent = title;
+    document.getElementById("module-kicker").textContent = kicker;
+    document.getElementById("module-description").textContent = description;
+    document.getElementById("module-panel-title").textContent = `${title} foundation is ready.`;
+
+    renderTopbar(`module.html?module=${key}`);
+    const session = await requireSession();
+    if (session) wireTopbar(session.user.email);
+  </script>
+</body>
+</html>

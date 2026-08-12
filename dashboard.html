@@ -3,60 +3,47 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Applications — Compliance Checker</title>
+<title>Dashboard — Compliance Checker</title>
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
   <div class="shell">
-    <div class="panel-head">
+    <section class="dashboard-hero">
       <div>
-        <span class="eyebrow">Workspace</span>
-        <h1>Applications</h1>
+        <div class="dashboard-kicker">Review workspace</div>
+        <h1>Make every application decision easier to defend.</h1>
+        <p>Track applicants, documents, findings, and compliance runs from one controlled workspace.</p>
       </div>
-      <button id="new-app-btn">New application</button>
-    </div>
+      <div class="dashboard-hero-action">
+        <a class="btn" href="applications.html?new=1">New application</a>
+        <a class="btn secondary" href="module.html?module=students">Add student</a>
+      </div>
+    </section>
 
     <div id="notice-slot"></div>
 
-    <div class="panel" id="new-app-panel" style="display:none;">
-      <div class="panel-head"><h2>New application</h2></div>
-      <div class="grid-2">
-        <div>
-          <h3>Student</h3>
-          <div class="field">
-            <label for="stu-existing">Existing student</label>
-            <select id="stu-existing"><option value="">— New student —</option></select>
-          </div>
-          <div id="new-stu-fields">
-            <div class="field"><label for="stu-name">Full name</label><input id="stu-name" placeholder="Jane Doe" /></div>
-            <div class="field-row">
-              <div class="field"><label for="stu-dob">Date of birth</label><input id="stu-dob" type="date" /></div>
-              <div class="field"><label for="stu-nat">Nationality</label><input id="stu-nat" placeholder="e.g. Nigerian" /></div>
-            </div>
-            <div class="field-row">
-              <div class="field"><label for="stu-passport">Passport number</label><input id="stu-passport" placeholder="A1234567" /></div>
-              <div class="field"><label for="stu-email">Email</label><input id="stu-email" type="email" placeholder="student@example.com" /></div>
-            </div>
-          </div>
-        </div>
-        <div>
-          <h3>Placement</h3>
-          <div class="field"><label for="app-country">Country</label><input id="app-country" placeholder="e.g. United Kingdom" /></div>
-          <div class="field"><label for="app-university">University</label><input id="app-university" placeholder="e.g. York St John University" /></div>
-          <div class="field"><label for="app-programme">Programme</label><input id="app-programme" placeholder="e.g. BSc Nursing" /></div>
-          <div class="field"><label for="app-intake">Intake</label><input id="app-intake" placeholder="e.g. Jan 2027" /></div>
-        </div>
-      </div>
-      <div class="field-row" style="margin-top:8px;">
-        <button id="create-app-btn">Create application</button>
-        <button class="secondary" id="cancel-app-btn">Cancel</button>
-      </div>
-    </div>
+    <section class="dashboard-grid" aria-label="Workspace summary">
+      <article class="metric-card"><div class="metric-label">Applications</div><div class="metric-value" id="metric-applications">—</div><div class="metric-note">Active review records</div></article>
+      <article class="metric-card"><div class="metric-label">Students</div><div class="metric-value" id="metric-students">—</div><div class="metric-note">Applicants in your workspace</div></article>
+      <article class="metric-card"><div class="metric-label">Documents</div><div class="metric-value" id="metric-documents">—</div><div class="metric-note">Uploaded evidence files</div></article>
+      <article class="metric-card"><div class="metric-label">Open findings</div><div class="metric-value" id="metric-findings">—</div><div class="metric-note">Items requiring attention</div></article>
+    </section>
 
-    <div class="panel">
-      <div class="panel-head"><span class="eyebrow">All applications</span></div>
-      <div id="app-list"><p style="color:var(--ink-soft);">Loading…</p></div>
-    </div>
+    <section class="dashboard-columns">
+      <article class="panel dashboard-panel">
+        <div class="panel-head"><div><div class="eyebrow">Recent activity</div><h2>Applications in motion</h2></div><a class="btn secondary" href="applications.html">View all</a></div>
+        <div id="recent-applications" class="dashboard-list"><p style="color:var(--ink-soft);">Loading recent applications…</p></div>
+      </article>
+      <article class="panel dashboard-panel">
+        <div class="panel-head"><div><div class="eyebrow">Workspace setup</div><h2>Next useful action</h2></div></div>
+        <div class="quick-actions">
+          <a class="quick-action" href="module.html?module=students"><div><strong>Build your student list</strong><span>Create reusable applicant records.</span></div><span aria-hidden="true">→</span></a>
+          <a class="quick-action" href="document-types.html"><div><strong>Configure document types</strong><span>Control the evidence your reviews expect.</span></div><span aria-hidden="true">→</span></a>
+          <a class="quick-action" href="module.html?module=compliance-rules"><div><strong>Review compliance rules</strong><span>Set the requirements used in Stage 3.</span></div><span aria-hidden="true">→</span></a>
+          <a class="quick-action" href="module.html?module=reports"><div><strong>Prepare reporting</strong><span>Reports will attach to completed runs.</span></div><span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+    </section>
   </div>
 
   <script src="assets/config.js"></script>
@@ -69,136 +56,61 @@
     const session = await requireSession();
     if (session) {
       wireTopbar(session.user.email);
-      init(session.user.id);
+      await loadDashboard(session.user.id);
     }
 
     const noticeSlot = document.getElementById("notice-slot");
     function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
 
-    async function init(userId) {
-      await loadStudents(userId);
-      await loadApplications(userId);
-
-      document.getElementById("new-app-btn").addEventListener("click", () => {
-        document.getElementById("new-app-panel").style.display = "block";
-      });
-      document.getElementById("cancel-app-btn").addEventListener("click", () => {
-        document.getElementById("new-app-panel").style.display = "none";
-      });
-      document.getElementById("stu-existing").addEventListener("change", (e) => {
-        document.getElementById("new-stu-fields").style.display = e.target.value ? "none" : "block";
-      });
-      document.getElementById("create-app-btn").addEventListener("click", () => createApplication(userId));
+    async function countRows(table, userId, ownerColumn = "owner_id") {
+      let query = supabase.from(table).select("id", { count: "exact", head: true });
+      if (ownerColumn) query = query.eq(ownerColumn, userId);
+      const { count, error } = await query;
+      if (error) throw error;
+      return count || 0;
     }
 
-    async function loadStudents(userId) {
-      const { data, error } = await supabase.from("students").select("id, full_name").eq("owner_id", userId).order("full_name");
-      if (error) { showNotice("error", error.message); return; }
-      const sel = document.getElementById("stu-existing");
-      for (const s of data || []) {
-        const opt = document.createElement("option");
-        opt.value = s.id; opt.textContent = s.full_name;
-        sel.appendChild(opt);
+    async function loadDashboard(userId) {
+      try {
+        const [applications, students, documents, findings] = await Promise.all([
+          countRows("applications", userId),
+          countRows("students", userId),
+          countRows("documents", userId),
+          countRows("compliance_findings", userId, null),
+        ]);
+        document.getElementById("metric-applications").textContent = applications;
+        document.getElementById("metric-students").textContent = students;
+        document.getElementById("metric-documents").textContent = documents;
+        document.getElementById("metric-findings").textContent = findings;
+
+        const { data, error } = await supabase
+          .from("applications")
+          .select("id, intake, status, overall_status, updated_at, students(full_name), universities(name), programmes(name)")
+          .eq("owner_id", userId)
+          .order("updated_at", { ascending: false })
+          .limit(5);
+        if (error) throw error;
+        renderRecentApplications(data || []);
+      } catch (err) {
+        showNotice("error", err.message || "Could not load workspace summary.");
       }
     }
 
-    async function loadApplications(userId) {
-      const { data, error } = await supabase
-        .from("applications")
-        .select("id, intake, status, overall_status, updated_at, students(full_name), universities(name), programmes(name)")
-        .eq("owner_id", userId)
-        .order("updated_at", { ascending: false });
+    function statusClass(status) {
+      return status === "green" || status === "yellow" || status === "red" ? status : "grey";
+    }
 
-      const list = document.getElementById("app-list");
-      if (error) { list.innerHTML = `<div class="notice error">${error.message}</div>`; return; }
-      if (!data || data.length === 0) {
-        list.innerHTML = `<div class="empty-state">No applications yet. Create one above to start a compliance review.</div>`;
+    function renderRecentApplications(applications) {
+      const target = document.getElementById("recent-applications");
+      if (!applications.length) {
+        target.innerHTML = `<div class="empty-state">No applications yet. Start by creating your first review.</div>`;
         return;
       }
-      list.innerHTML = data.map(rowHtml).join("");
-    }
-
-    function stampClass(status) {
-      if (status === "green") return "green";
-      if (status === "yellow") return "yellow";
-      if (status === "red") return "red";
-      return "grey";
-    }
-
-    function rowHtml(app) {
-      const stamp = app.overall_status
-        ? `<span class="stamp ${stampClass(app.overall_status)}">${app.overall_status}</span>`
-        : `<span class="stamp grey">not run</span>`;
-      return `
-        <div class="list-row">
-          <div>
-            <div class="title">${app.students?.full_name ?? "Unnamed student"} — ${app.universities?.name ?? "No university set"}</div>
-            <div class="meta">${app.programmes?.name ?? "No programme set"} · ${app.intake ?? "intake tbd"} · status: ${app.status}</div>
-          </div>
-          <div style="display:flex; align-items:center; gap:14px;">
-            ${stamp}
-            <a class="btn secondary" href="application.html?id=${app.id}">Open</a>
-          </div>
-        </div>`;
-    }
-
-    async function createApplication(userId) {
-      try {
-        const existingStudentId = document.getElementById("stu-existing").value;
-        let studentId = existingStudentId || null;
-
-        if (!studentId) {
-          const name = document.getElementById("stu-name").value.trim();
-          if (!name) { showNotice("error", "Student full name is required."); return; }
-          const { data: stu, error: stuErr } = await supabase.from("students").insert({
-            owner_id: userId,
-            full_name: name,
-            date_of_birth: document.getElementById("stu-dob").value || null,
-            nationality: document.getElementById("stu-nat").value.trim() || null,
-            passport_number: document.getElementById("stu-passport").value.trim() || null,
-            email: document.getElementById("stu-email").value.trim() || null,
-          }).select("id").single();
-          if (stuErr) throw stuErr;
-          studentId = stu.id;
-        }
-
-        const countryName = document.getElementById("app-country").value.trim();
-        const universityName = document.getElementById("app-university").value.trim();
-        const programmeName = document.getElementById("app-programme").value.trim();
-
-        const countryId = countryName ? await upsertLookup("countries", { name: countryName, owner_id: userId }) : null;
-        const universityId = universityName ? await upsertLookup("universities", { name: universityName, country_id: countryId, owner_id: userId }) : null;
-        const programmeId = programmeName ? await upsertLookup("programmes", { name: programmeName, university_id: universityId, owner_id: userId }) : null;
-
-        const { data: app, error: appErr } = await supabase.from("applications").insert({
-          owner_id: userId,
-          student_id: studentId,
-          country_id: countryId,
-          university_id: universityId,
-          programme_id: programmeId,
-          intake: document.getElementById("app-intake").value.trim() || null,
-          status: "draft",
-        }).select("id").single();
-        if (appErr) throw appErr;
-
-        window.location.href = `application.html?id=${app.id}`;
-      } catch (err) {
-        showNotice("error", err.message || "Could not create application.");
-      }
-    }
-
-    // Look up an existing row by unique name (scoped by parent id where relevant)
-    // or insert it. Keeps countries/universities/programmes de-duplicated
-    // without needing a separate admin screen for the MVP.
-    async function upsertLookup(table, fields) {
-      let query = supabase.from(table).select("id").eq("name", fields.name);
-      if ("country_id" in fields) query = fields.country_id ? query.eq("country_id", fields.country_id) : query.is("country_id", null);
-      if ("university_id" in fields) query = fields.university_id ? query.eq("university_id", fields.university_id) : query.is("university_id", null);
-      const { data: existing } = await query.maybeSingle();
-      if (existing) return existing.id;
-      const { data: created, error } = await supabase.from(table).insert(fields).select("id").single();
-      if (error) throw error;
-      return created.id;
+      target.innerHTML = applications.map((app) => `
+        <div class="dashboard-list-item">
+          <div><div class="title">${app.students?.full_name || "Unnamed student"}</div><div class="meta">${app.universities?.name || "No university"} · ${app.programmes?.name || "No programme"} · ${app.intake || "Intake TBD"}</div></div>
+          <div class="right"><span class="stamp ${statusClass(app.overall_status)}">${app.overall_status || "not run"}</span><div class="meta"><a href="application.html?id=${app.id}">Open review</a></div></div>
+        </div>`).join("");
     }
   </script>
 </body>

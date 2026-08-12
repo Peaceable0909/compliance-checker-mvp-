@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="shell">
-    <a href="dashboard.html" style="font-size:0.82rem; color:var(--ink-soft); text-decoration:none;">&larr; All applications</a>
+    <a href="applications.html" style="font-size:0.82rem; color:var(--ink-soft); text-decoration:none;">&larr; All applications</a>
 
     <div class="panel-head" style="margin-top:10px;">
       <div>
@@ -66,11 +66,11 @@
     import { getComplianceProvider } from "./assets/providers/compliance-ai.js";
     import { getDocumentAIProvider } from "./assets/providers/document-ai.js";
 
-    renderTopbar(null);
+    renderTopbar("applications.html");
     const session = await requireSession();
     const params = new URLSearchParams(window.location.search);
     const applicationId = params.get("id");
-    if (!applicationId) window.location.href = "dashboard.html";
+    if (!applicationId) window.location.href = "applications.html";
 
     const noticeSlot = document.getElementById("notice-slot");
     function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
