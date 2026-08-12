@@ -166,9 +166,9 @@
         const universityName = document.getElementById("app-university").value.trim();
         const programmeName = document.getElementById("app-programme").value.trim();
 
-        const countryId = countryName ? await upsertLookup("countries", { name: countryName }) : null;
-        const universityId = universityName ? await upsertLookup("universities", { name: universityName, country_id: countryId }) : null;
-        const programmeId = programmeName ? await upsertLookup("programmes", { name: programmeName, university_id: universityId }) : null;
+        const countryId = countryName ? await upsertLookup("countries", { name: countryName, owner_id: userId }) : null;
+        const universityId = universityName ? await upsertLookup("universities", { name: universityName, country_id: countryId, owner_id: userId }) : null;
+        const programmeId = programmeName ? await upsertLookup("programmes", { name: programmeName, university_id: universityId, owner_id: userId }) : null;
 
         const { data: app, error: appErr } = await supabase.from("applications").insert({
           owner_id: userId,
