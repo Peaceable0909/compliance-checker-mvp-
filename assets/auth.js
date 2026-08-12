@@ -18,11 +18,18 @@ export async function requireSession() {
 }
 
 export async function signUp(email, password, displayName) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { display_name: displayName || email.split("@")[0] } },
+  });
   if (error) throw error;
   // No DB trigger creates the profile row automatically, so do it here.
   // RLS policy "profiles own row" allows a user to insert their own id.
-  if (data.user) {
+  // With email confirmation enabled, Supabase returns a user but no session.
+  // RLS correctly rejects profile writes until auth.uid() exists, so defer the
+  // profile upsert until the user signs in.
+  if (data.session && data.user) {
     const { error: profileError } = await supabase.from("profiles").upsert({
       id: data.user.id,
       display_name: displayName || email.split("@")[0],
@@ -36,6 +43,16 @@ export async function signUp(email, password, displayName) {
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+
+  // Create the profile after authentication, when auth.uid() is available.
+  if (data.user) {
+    const { error: profileError } = await supabase.from("profiles").upsert({
+      id: data.user.id,
+      display_name: data.user.user_metadata?.display_name || email.split("@")[0],
+      role: "reviewer",
+    });
+    if (profileError) throw profileError;
+  }
   return data;
 }
 
