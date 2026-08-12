@@ -41,22 +41,6 @@
     </div>
   </div>
 
-  <!-- Extraction entry template (rendered per-document via JS) -->
-  <template id="extraction-form-tpl">
-    <div class="grid-2" style="margin-top:8px;">
-      <div class="field"><label>Full name (as shown)</label><input data-f="fullName" /></div>
-      <div class="field"><label>Date of birth</label><input data-f="dateOfBirth" type="date" /></div>
-      <div class="field"><label>Passport number</label><input data-f="passportNumber" /></div>
-      <div class="field"><label>Expiry date (if applicable)</label><input data-f="expiryDate" type="date" /></div>
-      <div class="field"><label>Detected document type</label><input data-f="detectedDocumentType" placeholder="e.g. Passport" /></div>
-      <div class="field">
-        <label><input type="checkbox" data-f="readable" checked style="width:auto; display:inline-block; margin-right:6px;" />Readable</label>
-        <label style="margin-top:6px;"><input type="checkbox" data-f="complete" checked style="width:auto; display:inline-block; margin-right:6px;" />Complete</label>
-      </div>
-    </div>
-    <button data-action="save-extraction" class="secondary" style="margin-top:4px;">Save extraction</button>
-  </template>
-
   <script src="assets/config.js"></script>
   <script type="module">
     import { requireSession, wireTopbar } from "./assets/auth.js";
@@ -134,6 +118,8 @@
       }
 
       renderDoctypeBlocks();
+      const queuedDocuments = documents.filter((document) => document.processing_status === "queued" && !extractionsByDoc[document.id]);
+      for (const document of queuedDocuments) processDocument(document.id);
     }
 
     // Which document types currently have a block on screen: system types,
@@ -160,9 +146,6 @@
         const input = container.querySelector(`input[type=file][data-type-id="${t.id}"]`);
         if (input) input.addEventListener("change", (e) => uploadFiles(t, e.target.files));
       }
-      container.querySelectorAll("[data-action='extract']").forEach((btn) => {
-        btn.addEventListener("click", () => toggleExtractionForm(btn.dataset.docId));
-      });
     }
 
     function typeBlockHtml(t) {
@@ -189,55 +172,43 @@
             <span>${d.file_name} <span style="color:var(--ink-soft); font-size:0.78rem;">(${Math.round(d.file_size / 1024)} KB)</span></span>
             <div style="display:flex; align-items:center; gap:8px;">
               ${statusBadge}
-              ${ex ? '<span class="badge accepted">extracted</span>' : ""}
-              <button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="extract" data-doc-id="${d.id}">${ex ? "Edit extraction" : "Add extraction"}</button>
+              ${ex ? '<span class="badge accepted">processed</span>' : '<span class="badge warning">processing automatically</span>'}
             </div>
           </div>
           <div id="extraction-slot-${d.id}"></div>
         </div>`;
     }
 
-    function toggleExtractionForm(docId) {
-      const slot = document.getElementById(`extraction-slot-${docId}`);
-      if (slot.childElementCount > 0) { slot.innerHTML = ""; return; }
-      const tpl = document.getElementById("extraction-form-tpl").content.cloneNode(true);
-      const existing = extractionsByDoc[docId]?.extracted_data || {};
-      const wrapper = document.createElement("div");
-      wrapper.appendChild(tpl);
-      for (const el of wrapper.querySelectorAll("[data-f]")) {
-        const key = el.dataset.f;
-        if (el.type === "checkbox") el.checked = existing[key] !== false;
-        else el.value = existing[key] ?? "";
-      }
-      wrapper.querySelector("[data-action='save-extraction']").addEventListener("click", () => saveExtraction(docId, wrapper));
-      slot.appendChild(wrapper);
-    }
-
-    async function saveExtraction(docId, wrapper) {
+    async function processDocument(docId, uploadedFile = null) {
+      const document = documents.find((item) => item.id === docId);
+      if (!document) return;
       try {
-        const fields = {};
-        for (const el of wrapper.querySelectorAll("[data-f]")) {
-          fields[el.dataset.f] = el.type === "checkbox" ? el.checked : (el.value.trim() || null);
+        showNotice("queue", `Processing ${document.file_name} automatically…`);
+        const type = documentTypes.find((item) => item.id === document.document_type_id);
+        let file = uploadedFile;
+        if (!file) {
+          const storage = getStorageProvider();
+          const signedUrl = await storage.getSignedUrl(document.storage_path);
+          const response = await fetch(signedUrl);
+          const blob = await response.blob();
+          file = new File([blob], document.file_name, { type: document.mime_type || blob.type || "application/octet-stream" });
         }
         const docAI = getDocumentAIProvider();
-        const result = await docAI.extract(fields);
-
+        const result = await docAI.extract({ file, document, documentType: type });
         const { error } = await supabase.from("document_extractions").insert({
           document_id: docId, provider: result.provider, model: result.model,
           extracted_data: result.extracted_data, confidence: result.confidence,
         });
         if (error) throw error;
-
-        await supabase.from("documents").update({
+        const { error: updateError } = await supabase.from("documents").update({
           processing_status: "ready",
-          detected_document_type: fields.detectedDocumentType,
+          detected_document_type: result.extracted_data?.extractedDocumentType || type?.name || null,
           processed_at: new Date().toISOString(),
         }).eq("id", docId);
-
-        showNotice("ok", "Extraction saved.");
+        if (updateError) throw updateError;
         await loadDocuments();
       } catch (err) {
-        showNotice("error", err.message || "Could not save extraction.");
+        showNotice("error", `${document.file_name}: ${err.message || "Automatic processing failed."}`);
       }
     }
 
@@ -252,15 +223,17 @@
           }
           const path = storage.buildPath(userId, applicationId, slug(docType.name), file.name);
           await storage.upload(path, file);
-          const { error } = await supabase.from("documents").insert({
+          const { data: doc, error } = await supabase.from("documents").insert({
             owner_id: userId, application_id: applicationId, student_id: application.student_id,
             document_type_id: docType.id, file_name: file.name, mime_type: file.type || "application/octet-stream",
             file_size: file.size, storage_bucket: window.APP_CONFIG.STORAGE_BUCKET, storage_path: path,
             processing_status: "queued",
-          });
+          }).select("id").single();
           if (error) throw error;
+          documents.push({ ...doc, file_name: file.name, document_type_id: docType.id, storage_path: path, mime_type: file.type, processing_status: "queued" });
+          await processDocument(doc.id, file);
         }
-        showNotice("ok", "Upload complete. Documents are queued — add an extraction, then run the compliance check.");
+        showNotice("ok", "Upload complete. Documents were processed automatically. Run compliance when ready.");
         await loadDocuments();
       } catch (err) {
         showNotice("error", err.message || "Upload failed.");

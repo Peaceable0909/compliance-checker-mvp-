@@ -66,6 +66,44 @@ function configuredRuleSeverity(rule) {
   return rule.severity === "warning" || rule.severity === "info" ? rule.severity : "critical";
 }
 
+function numeric(value) {
+  if (typeof value === "number") return value;
+  const parsed = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function matchingDocuments(rule, input) {
+  if (rule.scope === "document_type") return input.documents.filter((doc) => doc.documentTypeId === rule.document_type_id);
+  return input.documents;
+}
+
+function evaluateThresholdRule(findings, input, rule, field, label, options = {}) {
+  const docs = matchingDocuments(rule, input);
+  const values = docs.map((doc) => ({ doc, value: numeric(doc.extraction?.[field]) })).filter((item) => item.value !== null);
+  const expected = numeric((rule.condition_config || rule.rule_config || {}).value);
+  if (expected === null) return;
+  if (!values.length) {
+    addFinding(findings, input, `${rule.rule_key || field}_manual_review`, "warning", (rule.action_config || {}).message || `${label} could not be determined from the uploaded evidence.`, { ruleId: rule.id, ruleName: rule.name, expected, field, status: "missing_extraction" }, { recommendation: (rule.action_config || {}).recommendation || "Review the extracted evidence manually.", confidence: null });
+    return;
+  }
+  const comparison = options.mode === "minimum" ? values.some(({ value }) => value >= expected) : values.some(({ value }) => value <= expected);
+  if (!comparison) {
+    const actual = values[0].value;
+    addFinding(findings, input, rule.rule_key || field, configuredRuleSeverity(rule), (rule.action_config || {}).message || `${label} does not meet the configured requirement.`, { ruleId: rule.id, ruleName: rule.name, expected, actual, field, documents: values.map(({ doc }) => doc.fileName) }, { expectedValue: String(expected), actualValue: String(actual), recommendation: (rule.action_config || {}).recommendation || null, confidence: values[0].doc.extraction?.confidence ?? null });
+  }
+}
+
+function evaluateAdvancedRules(findings, input, rule) {
+  const field = (rule.condition_config || rule.rule_config || {}).field;
+  if (field === "gpa_minimum") return evaluateThresholdRule(findings, input, rule, "gpa", "GPA", { mode: "minimum" });
+  if (field === "english_ielts_minimum") return evaluateThresholdRule(findings, input, rule, "ieltsOverall", "IELTS overall score", { mode: "minimum" });
+  if (field === "english_band_minimum") return evaluateThresholdRule(findings, input, rule, "ieltsLowestBand", "IELTS minimum band", { mode: "minimum" });
+  if (field === "english_toefl_minimum") return evaluateThresholdRule(findings, input, rule, "toeflTotal", "TOEFL score", { mode: "minimum" });
+  if (field === "english_pte_minimum") return evaluateThresholdRule(findings, input, rule, "pteTotal", "PTE score", { mode: "minimum" });
+  if (field === "financial_minimum_balance") return evaluateThresholdRule(findings, input, rule, "accountBalance", "Financial balance", { mode: "minimum" });
+  if (field === "financial_maintenance_period") return evaluateThresholdRule(findings, input, rule, "maintenancePeriodDays", "Financial maintenance period", { mode: "minimum" });
+}
+
 function evaluateConfiguredRules(findings, input) {
   for (const rule of (input.rules || []).filter(activeRule).sort((a, b) => (a.priority || 100) - (b.priority || 100))) {
     if (!ruleMatchesApplication(rule, input)) continue;
@@ -76,7 +114,9 @@ function evaluateConfiguredRules(findings, input) {
       ? input.documents.filter((doc) => doc.documentTypeId === rule.document_type_id)
       : input.documents;
 
-    if (condition.field === "required_field" && condition.operator === "missing") {
+    if (["gpa_minimum", "english_ielts_minimum", "english_band_minimum", "english_toefl_minimum", "english_pte_minimum", "financial_minimum_balance", "financial_maintenance_period"].includes(condition.field)) {
+      evaluateAdvancedRules(findings, input, rule);
+    } else if (condition.field === "required_field" && condition.operator === "missing") {
       for (const document of targetDocuments) {
         if (!document.extraction || !condition.value || !document.extraction[condition.value]) {
           addFinding(findings, input, rule.rule_key || "configured_required_field", severity, action.message || `${rule.name} was not satisfied.`, { ruleId: rule.id, ruleName: rule.name, field: condition.value, fileName: document.fileName }, { documentId: document.id, expectedValue: condition.value, recommendation: action.recommendation || null, confidence: 1 });
