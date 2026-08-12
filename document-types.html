@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Document types — Compliance Checker</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="panel-head">
+      <div>
+        <span class="eyebrow">Configuration</span>
+        <h1>Document types</h1>
+      </div>
+    </div>
+    <p style="color:var(--ink-soft); max-width:60ch; margin-top:-8px;">
+      System types (Passport, Transcript, IELTS…) are shared by every reviewer. Custom types you add here —
+      like <em>Father Sponsorship Letter</em> — behave exactly like system types: they can be selected on any
+      application, and each one accepts multiple documents.
+    </p>
+
+    <div id="notice-slot"></div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Add a custom document type</h2></div>
+      <div class="field-row">
+        <div class="field"><label for="dt-name">Name</label><input id="dt-name" placeholder="Father Sponsorship Letter" /></div>
+        <div class="field"><label for="dt-desc">Description (optional)</label><input id="dt-desc" placeholder="Signed sponsorship letter from a parent/guardian" /></div>
+      </div>
+      <button id="add-dt-btn">Add document type</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="eyebrow">System types</span></div>
+      <div id="system-list"><p style="color:var(--ink-soft);">Loading…</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="eyebrow">Your custom types</span></div>
+      <div id="custom-list"><p style="color:var(--ink-soft);">Loading…</p></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireSession, wireTopbar } from "./assets/auth.js";
+    import { renderTopbar } from "./assets/topbar.js";
+    import { supabase } from "./assets/supabase-client.js";
+
+    renderTopbar("document-types.html");
+    const session = await requireSession();
+    let userId;
+    if (session) {
+      wireTopbar(session.user.email);
+      userId = session.user.id;
+      await loadTypes();
+      document.getElementById("add-dt-btn").addEventListener("click", addType);
+    }
+
+    const noticeSlot = document.getElementById("notice-slot");
+    function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
+
+    async function loadTypes() {
+      const { data, error } = await supabase.from("document_types").select("id, name, description, is_system, required_by_default").order("name");
+      if (error) { showNotice("error", error.message); return; }
+      const system = (data || []).filter((t) => t.is_system);
+      const custom = (data || []).filter((t) => !t.is_system);
+
+      document.getElementById("system-list").innerHTML = system.length
+        ? system.map(rowHtml).join("")
+        : `<div class="empty-state">No system document types have been seeded yet. Ask an admin to add the standard set (Passport, Transcript, IELTS…), or add them here as custom types.</div>`;
+
+      document.getElementById("custom-list").innerHTML = custom.length
+        ? custom.map(rowHtml).join("")
+        : `<div class="empty-state">No custom document types yet.</div>`;
+    }
+
+    function rowHtml(t) {
+      return `<div class="list-row">
+        <div>
+          <div class="title">${t.name}${t.required_by_default ? ' <span class="badge critical">required</span>' : ""}</div>
+          <div class="meta">${t.description ?? ""}</div>
+        </div>
+      </div>`;
+    }
+
+    async function addType() {
+      const name = document.getElementById("dt-name").value.trim();
+      const description = document.getElementById("dt-desc").value.trim() || null;
+      if (!name) { showNotice("error", "Name is required."); return; }
+      const { error } = await supabase.from("document_types").insert({
+        owner_id: userId, name, description, is_system: false,
+      });
+      if (error) { showNotice("error", error.message); return; }
+      document.getElementById("dt-name").value = "";
+      document.getElementById("dt-desc").value = "";
+      showNotice("ok", `"${name}" added. It now behaves like any other document type on your applications.`);
+      await loadTypes();
+    }
+  </script>
+</body>
+</html>

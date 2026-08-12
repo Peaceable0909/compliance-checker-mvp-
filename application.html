@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Application — Compliance Checker</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <a href="dashboard.html" style="font-size:0.82rem; color:var(--ink-soft); text-decoration:none;">&larr; All applications</a>
+
+    <div class="panel-head" style="margin-top:10px;">
+      <div>
+        <span class="eyebrow">Application</span>
+        <h1 id="app-title">Loading…</h1>
+        <div id="app-meta" style="color:var(--ink-soft); font-size:0.86rem;"></div>
+      </div>
+      <div style="text-align:right;">
+        <div id="app-stamp"></div>
+      </div>
+    </div>
+
+    <div id="notice-slot"></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="eyebrow">Documents</span>
+        <button id="add-doctype-btn" class="secondary">+ Use another document type</button>
+      </div>
+      <div id="doctype-blocks"><p style="color:var(--ink-soft);">Loading…</p></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="eyebrow">Compliance</span>
+        <button id="run-check-btn">Run compliance check</button>
+      </div>
+      <div id="run-summary" style="margin-bottom:12px;"></div>
+      <div id="findings-table"></div>
+    </div>
+  </div>
+
+  <!-- Extraction entry template (rendered per-document via JS) -->
+  <template id="extraction-form-tpl">
+    <div class="grid-2" style="margin-top:8px;">
+      <div class="field"><label>Full name (as shown)</label><input data-f="fullName" /></div>
+      <div class="field"><label>Date of birth</label><input data-f="dateOfBirth" type="date" /></div>
+      <div class="field"><label>Passport number</label><input data-f="passportNumber" /></div>
+      <div class="field"><label>Expiry date (if applicable)</label><input data-f="expiryDate" type="date" /></div>
+      <div class="field"><label>Detected document type</label><input data-f="detectedDocumentType" placeholder="e.g. Passport" /></div>
+      <div class="field">
+        <label><input type="checkbox" data-f="readable" checked style="width:auto; display:inline-block; margin-right:6px;" />Readable</label>
+        <label style="margin-top:6px;"><input type="checkbox" data-f="complete" checked style="width:auto; display:inline-block; margin-right:6px;" />Complete</label>
+      </div>
+    </div>
+    <button data-action="save-extraction" class="secondary" style="margin-top:4px;">Save extraction</button>
+  </template>
+
+  <script type="module">
+    import { requireSession, wireTopbar } from "./assets/auth.js";
+    import { renderTopbar } from "./assets/topbar.js";
+    import { supabase } from "./assets/supabase-client.js";
+    import { getStorageProvider } from "./assets/providers/storage.js";
+    import { getComplianceProvider } from "./assets/providers/compliance-ai.js";
+    import { getDocumentAIProvider } from "./assets/providers/document-ai.js";
+
+    renderTopbar(null);
+    const session = await requireSession();
+    const params = new URLSearchParams(window.location.search);
+    const applicationId = params.get("id");
+    if (!applicationId) window.location.href = "dashboard.html";
+
+    const noticeSlot = document.getElementById("notice-slot");
+    function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
+    function slug(name) { return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
+    function stampClass(status) { return status === "green" ? "green" : status === "yellow" ? "yellow" : status === "red" ? "red" : "grey"; }
+
+    let userId, application, student, documentTypes = [], documents = [], extractionsByDoc = {};
+
+    if (session) {
+      wireTopbar(session.user.email);
+      userId = session.user.id;
+      await loadAll();
+      document.getElementById("run-check-btn").addEventListener("click", runComplianceCheck);
+      document.getElementById("add-doctype-btn").addEventListener("click", promptAddDocType);
+    }
+
+    async function loadAll() {
+      const { data: app, error: appErr } = await supabase
+        .from("applications")
+        .select("*, students(*), universities(name), programmes(name), countries(name)")
+        .eq("id", applicationId).single();
+      if (appErr) { showNotice("error", appErr.message); return; }
+      application = app; student = app.students;
+
+      document.getElementById("app-title").textContent = `${student?.full_name ?? "Unnamed student"}`;
+      document.getElementById("app-meta").textContent =
+        `${app.universities?.name ?? "No university"} · ${app.programmes?.name ?? "No programme"} · ${app.countries?.name ?? "No country"} · intake ${app.intake ?? "tbd"}`;
+      renderStamp(app.overall_status);
+
+      const { data: types } = await supabase.from("document_types").select("*").order("name");
+      documentTypes = types || [];
+
+      await loadDocuments();
+      await loadLatestRun();
+    }
+
+    function renderStamp(status) {
+      document.getElementById("app-stamp").innerHTML = status
+        ? `<span class="stamp ${stampClass(status)}">${status}</span>`
+        : `<span class="stamp grey">not run</span>`;
+    }
+
+    async function loadDocuments() {
+      const { data: docs, error } = await supabase
+        .from("documents").select("*").eq("application_id", applicationId).order("uploaded_at", { ascending: false });
+      if (error) { showNotice("error", error.message); return; }
+      documents = docs || [];
+
+      if (documents.length) {
+        const { data: extractions } = await supabase
+          .from("document_extractions").select("*").in("document_id", documents.map((d) => d.id)).order("created_at", { ascending: false });
+        extractionsByDoc = {};
+        for (const ex of extractions || []) {
+          if (!extractionsByDoc[ex.document_id]) extractionsByDoc[ex.document_id] = ex; // most recent first
+        }
+      } else {
+        extractionsByDoc = {};
+      }
+
+      renderDoctypeBlocks();
+    }
+
+    // Which document types currently have a block on screen: system types,
+    // required types, any custom type that already has a document, and any
+    // type the reviewer explicitly opened via "Use another document type".
+    const forcedVisible = new Set();
+    function visibleTypes() {
+      const withDocs = new Set(documents.map((d) => d.document_type_id));
+      return documentTypes.filter(
+        (t) => t.is_system || t.required_by_default || withDocs.has(t.id) || forcedVisible.has(t.id)
+      );
+    }
+
+    function renderDoctypeBlocks() {
+      const container = document.getElementById("doctype-blocks");
+      const types = visibleTypes();
+      if (!types.length) {
+        container.innerHTML = `<div class="empty-state">No document types yet. Add one from the Document types page, or click "Use another document type" above.</div>`;
+        return;
+      }
+      container.innerHTML = types.map(typeBlockHtml).join("");
+
+      for (const t of types) {
+        const input = container.querySelector(`input[type=file][data-type-id="${t.id}"]`);
+        if (input) input.addEventListener("change", (e) => uploadFiles(t, e.target.files));
+      }
+      container.querySelectorAll("[data-action='extract']").forEach((btn) => {
+        btn.addEventListener("click", () => toggleExtractionForm(btn.dataset.docId));
+      });
+    }
+
+    function typeBlockHtml(t) {
+      const docsForType = documents.filter((d) => d.document_type_id === t.id);
+      return `
+        <div class="doctype-block">
+          <div class="doctype-head">
+            <h3 style="margin:0;">${t.name}${t.required_by_default ? ' <span class="badge critical">required</span>' : ""}</h3>
+            <span class="count">${docsForType.length} document${docsForType.length === 1 ? "" : "s"}</span>
+          </div>
+          ${docsForType.map((d) => docFileRowHtml(d)).join("") || '<p style="color:var(--ink-soft); font-size:0.85rem; margin:4px 0;">No documents uploaded yet.</p>'}
+          <div class="field" style="margin-top:10px; margin-bottom:0;">
+            <input type="file" multiple data-type-id="${t.id}" />
+          </div>
+        </div>`;
+    }
+
+    function docFileRowHtml(d) {
+      const ex = extractionsByDoc[d.id];
+      const statusBadge = `<span class="badge ${d.processing_status === "ready" ? "resolved" : "warning"}">${d.processing_status}</span>`;
+      return `
+        <div class="doc-file-row" style="flex-direction:column; align-items:stretch;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span>${d.file_name} <span style="color:var(--ink-soft); font-size:0.78rem;">(${Math.round(d.file_size / 1024)} KB)</span></span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              ${statusBadge}
+              ${ex ? '<span class="badge accepted">extracted</span>' : ""}
+              <button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="extract" data-doc-id="${d.id}">${ex ? "Edit extraction" : "Add extraction"}</button>
+            </div>
+          </div>
+          <div id="extraction-slot-${d.id}"></div>
+        </div>`;
+    }
+
+    function toggleExtractionForm(docId) {
+      const slot = document.getElementById(`extraction-slot-${docId}`);
+      if (slot.childElementCount > 0) { slot.innerHTML = ""; return; }
+      const tpl = document.getElementById("extraction-form-tpl").content.cloneNode(true);
+      const existing = extractionsByDoc[docId]?.extracted_data || {};
+      const wrapper = document.createElement("div");
+      wrapper.appendChild(tpl);
+      for (const el of wrapper.querySelectorAll("[data-f]")) {
+        const key = el.dataset.f;
+        if (el.type === "checkbox") el.checked = existing[key] !== false;
+        else el.value = existing[key] ?? "";
+      }
+      wrapper.querySelector("[data-action='save-extraction']").addEventListener("click", () => saveExtraction(docId, wrapper));
+      slot.appendChild(wrapper);
+    }
+
+    async function saveExtraction(docId, wrapper) {
+      try {
+        const fields = {};
+        for (const el of wrapper.querySelectorAll("[data-f]")) {
+          fields[el.dataset.f] = el.type === "checkbox" ? el.checked : (el.value.trim() || null);
+        }
+        const docAI = getDocumentAIProvider();
+        const result = await docAI.extract(fields);
+
+        const { error } = await supabase.from("document_extractions").insert({
+          document_id: docId, provider: result.provider, model: result.model,
+          extracted_data: result.extracted_data, confidence: result.confidence,
+        });
+        if (error) throw error;
+
+        await supabase.from("documents").update({
+          processing_status: "ready",
+          detected_document_type: fields.detectedDocumentType,
+          processed_at: new Date().toISOString(),
+        }).eq("id", docId);
+
+        showNotice("ok", "Extraction saved.");
+        await loadDocuments();
+      } catch (err) {
+        showNotice("error", err.message || "Could not save extraction.");
+      }
+    }
+
+    async function uploadFiles(docType, fileList) {
+      const storage = getStorageProvider();
+      const maxMb = window.APP_CONFIG.MAX_UPLOAD_SIZE_MB || 10;
+      try {
+        for (const file of fileList) {
+          if (file.size > maxMb * 1024 * 1024) {
+            showNotice("error", `${file.name} exceeds the ${maxMb} MB upload limit.`);
+            continue;
+          }
+          const path = storage.buildPath(userId, applicationId, slug(docType.name), file.name);
+          await storage.upload(path, file);
+          const { error } = await supabase.from("documents").insert({
+            owner_id: userId, application_id: applicationId, student_id: application.student_id,
+            document_type_id: docType.id, file_name: file.name, mime_type: file.type || "application/octet-stream",
+            file_size: file.size, storage_path: path, processing_status: "queued",
+          });
+          if (error) throw error;
+        }
+        showNotice("ok", "Upload complete. Documents are queued — add an extraction, then run the compliance check.");
+        await loadDocuments();
+      } catch (err) {
+        showNotice("error", err.message || "Upload failed.");
+      }
+    }
+
+    function promptAddDocType() {
+      const shown = new Set(visibleTypes().map((t) => t.id));
+      const remaining = documentTypes.filter((t) => !shown.has(t.id));
+      if (!remaining.length) {
+        showNotice("ok", "Every document type is already shown below. Add a new one from the Document types page.");
+        return;
+      }
+      const names = remaining.map((t) => t.name).join(", ");
+      const chosen = window.prompt(`Add which type?\n\n${names}`);
+      const match = remaining.find((t) => t.name.toLowerCase() === (chosen || "").trim().toLowerCase());
+      if (!match) return;
+      forcedVisible.add(match.id);
+      renderDoctypeBlocks();
+    }
+
+    async function runComplianceCheck() {
+      try {
+        showNotice("queue", "Running compliance check…");
+        const requiredTypes = documentTypes.filter((t) => t.required_by_default).map((t) => t.name);
+
+        const engineDocs = documents.map((d) => {
+          const type = documentTypes.find((t) => t.id === d.document_type_id);
+          const ex = extractionsByDoc[d.id];
+          return {
+            id: d.id,
+            fileName: d.file_name,
+            selectedType: type?.name || d.detected_document_type || "unknown",
+            extraction: ex ? ex.extracted_data : null,
+          };
+        });
+
+        const input = {
+          applicationId,
+          application: { dateOfBirth: student?.date_of_birth || null, passportNumber: student?.passport_number || null },
+          documents: engineDocs,
+          requiredDocumentTypes: requiredTypes,
+          requirements: {},
+        };
+
+        const provider = getComplianceProvider();
+        const result = await provider.evaluate(input);
+
+        const { data: run, error: runErr } = await supabase.from("compliance_runs").insert({
+          application_id: applicationId, started_by: userId, provider: provider.name,
+          stage_one_completed: true, stage_two_completed: true, stage_three_completed: true,
+          status: "completed", completed_at: new Date().toISOString(),
+        }).select("id").single();
+        if (runErr) throw runErr;
+
+        if (result.findings.length) {
+          const rows = result.findings.map((f) => ({
+            run_id: run.id, application_id: applicationId, document_id: f.documentId,
+            related_document_id: f.relatedDocumentId, finding_type: f.findingType, severity: f.severity,
+            state: f.state, description: f.description, evidence: f.evidence,
+            expected_value: f.expectedValue, actual_value: f.actualValue,
+            recommendation: f.recommendation, confidence: f.confidence,
+          }));
+          const { error: findErr } = await supabase.from("compliance_findings").insert(rows);
+          if (findErr) throw findErr;
+        }
+
+        await supabase.from("applications").update({
+          overall_status: result.status, documents_checked: result.documentsChecked,
+          passed_count: result.passed, warning_count: result.warnings,
+          failed_count: result.failed, missing_count: result.missing,
+          status: result.findings.length ? "needs_review" : application.status,
+          updated_at: new Date().toISOString(),
+        }).eq("id", applicationId);
+
+        await supabase.from("audit_logs").insert({
+          actor_id: userId, application_id: applicationId, event_type: "compliance_run_completed",
+          payload: { status: result.status, findings: result.findings.length, provider: provider.name },
+        });
+
+        renderStamp(result.status);
+        renderRunSummary(result);
+        renderFindings(result.findings);
+        showNotice("ok", `Compliance check complete — ${result.findings.length} finding(s).`);
+      } catch (err) {
+        showNotice("error", err.message || "Compliance check failed.");
+      }
+    }
+
+    async function loadLatestRun() {
+      const { data: run } = await supabase
+        .from("compliance_runs").select("*").eq("application_id", applicationId)
+        .order("started_at", { ascending: false }).limit(1).maybeSingle();
+      if (!run) return;
+      const { data: findings } = await supabase
+        .from("compliance_findings").select("*").eq("run_id", run.id).order("severity");
+      renderRunSummary({
+        documentsChecked: application.documents_checked, passed: application.passed_count,
+        warnings: application.warning_count, failed: application.failed_count, missing: application.missing_count,
+      });
+      renderFindings((findings || []).map((f) => ({
+        findingType: f.finding_type, severity: f.severity, state: f.state, description: f.description,
+        evidence: f.evidence, expectedValue: f.expected_value, actualValue: f.actual_value,
+        recommendation: f.recommendation, confidence: f.confidence,
+      })));
+    }
+
+    function renderRunSummary(r) {
+      document.getElementById("run-summary").innerHTML = `
+        <div class="field-row mono" style="font-size:0.82rem; color:var(--ink-soft);">
+          <span>checked: ${r.documentsChecked}</span>
+          <span>passed: ${r.passed}</span>
+          <span>warnings: ${r.warnings}</span>
+          <span>failed: ${r.failed}</span>
+          <span>missing: ${r.missing}</span>
+        </div>`;
+    }
+
+    function renderFindings(findings) {
+      const el = document.getElementById("findings-table");
+      if (!findings.length) { el.innerHTML = `<div class="empty-state">No findings on record yet. Run a compliance check to generate structured findings.</div>`; return; }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Severity</th><th>Type</th><th>Description</th><th>Expected</th><th>Actual</th><th>Recommendation</th><th>Evidence</th></tr></thead>
+          <tbody>
+            ${findings.map((f) => `
+              <tr>
+                <td><span class="badge ${f.severity}">${f.severity}</span></td>
+                <td class="mono">${f.findingType}</td>
+                <td>${f.description}</td>
+                <td>${f.expectedValue ?? "—"}</td>
+                <td>${f.actualValue ?? "—"}</td>
+                <td>${f.recommendation ?? "—"}</td>
+                <td><pre class="evidence-json">${JSON.stringify(f.evidence, null, 0)}</pre></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>`;
+    }
+  </script>
+</body>
+</html>

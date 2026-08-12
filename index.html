@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compliance Checker — Sign in</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell" style="max-width: 420px; padding-top: 12vh;">
+    <div style="text-align:center; margin-bottom: 28px;">
+      <span class="mark mono" style="font-family: var(--font-mono); font-size:11px; letter-spacing:0.14em; color: var(--verdigris); border:1px solid var(--verdigris); padding:2px 6px; border-radius:3px;">CC · MVP</span>
+      <h1 style="margin-top:10px;">Compliance Checker</h1>
+      <p style="color: var(--ink-soft); font-size:0.9rem;">Document review for international education applications.</p>
+    </div>
+
+    <div class="panel">
+      <div id="notice-slot"></div>
+
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+      </div>
+      <div class="field" id="name-field" style="display:none;">
+        <label for="displayName">Name</label>
+        <input id="displayName" type="text" placeholder="Reviewer name" />
+      </div>
+
+      <div class="field-row">
+        <button id="signin-btn" style="flex:1;">Sign in</button>
+        <button id="signup-btn" class="secondary" style="flex:1;">Create account</button>
+      </div>
+    </div>
+
+    <p class="footer-note">Runs on Supabase (free tier) · deterministic compliance engine, $0 AI cost by default.</p>
+  </div>
+
+  <script type="module">
+    import { supabase, configured } from "./assets/supabase-client.js";
+    import { signIn, signUp, getSession } from "./assets/auth.js";
+
+    const noticeSlot = document.getElementById("notice-slot");
+    function showNotice(kind, msg) {
+      noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`;
+    }
+
+    if (!configured) {
+      showNotice("error", "Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY to <code>assets/config.js</code> before signing in.");
+      document.getElementById("signin-btn").disabled = true;
+      document.getElementById("signup-btn").disabled = true;
+    } else {
+      getSession().then((session) => {
+        if (session) window.location.href = "dashboard.html";
+      });
+    }
+
+    const emailEl = document.getElementById("email");
+    const passwordEl = document.getElementById("password");
+    const nameField = document.getElementById("name-field");
+    const nameEl = document.getElementById("displayName");
+
+    document.getElementById("signin-btn").addEventListener("click", async () => {
+      try {
+        showNotice("queue", "Signing in…");
+        await signIn(emailEl.value.trim(), passwordEl.value);
+        window.location.href = "dashboard.html";
+      } catch (err) {
+        showNotice("error", err.message || "Sign in failed.");
+      }
+    });
+
+    let signupArmed = false;
+    document.getElementById("signup-btn").addEventListener("click", async () => {
+      if (!signupArmed) {
+        nameField.style.display = "block";
+        signupArmed = true;
+        showNotice("queue", "Enter a name, then click \u201cCreate account\u201d again to confirm.");
+        return;
+      }
+      try {
+        showNotice("queue", "Creating account…");
+        await signUp(emailEl.value.trim(), passwordEl.value, nameEl.value.trim());
+        showNotice("ok", "Account created. If email confirmation is on in your Supabase project, check your inbox, then sign in.");
+      } catch (err) {
+        showNotice("error", err.message || "Sign up failed.");
+      }
+    });
+  </script>
+</body>
+</html>
