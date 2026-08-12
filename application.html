@@ -57,6 +57,7 @@
     <button data-action="save-extraction" class="secondary" style="margin-top:4px;">Save extraction</button>
   </template>
 
+  <script src="assets/config.js"></script>
   <script type="module">
     import { requireSession, wireTopbar } from "./assets/auth.js";
     import { renderTopbar } from "./assets/topbar.js";
@@ -251,7 +252,8 @@
           const { error } = await supabase.from("documents").insert({
             owner_id: userId, application_id: applicationId, student_id: application.student_id,
             document_type_id: docType.id, file_name: file.name, mime_type: file.type || "application/octet-stream",
-            file_size: file.size, storage_path: path, processing_status: "queued",
+            file_size: file.size, storage_bucket: window.APP_CONFIG.STORAGE_BUCKET, storage_path: path,
+            processing_status: "queued",
           });
           if (error) throw error;
         }

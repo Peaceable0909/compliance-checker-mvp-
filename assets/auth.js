@@ -23,11 +23,12 @@ export async function signUp(email, password, displayName) {
   // No DB trigger creates the profile row automatically, so do it here.
   // RLS policy "profiles own row" allows a user to insert their own id.
   if (data.user) {
-    await supabase.from("profiles").upsert({
+    const { error: profileError } = await supabase.from("profiles").upsert({
       id: data.user.id,
       display_name: displayName || email.split("@")[0],
       role: "reviewer",
     });
+    if (profileError) throw profileError;
   }
   return data;
 }

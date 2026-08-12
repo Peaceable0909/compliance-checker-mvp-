@@ -1,20 +1,11 @@
-// Environment-last configuration.
-//
-// Fill these in yourself before the site works against real data. Nothing in
-// this repo commits real credentials. SUPABASE_ANON_KEY is safe to expose in
-// client code (it is the public/anon key, not the service role key) as long
-// as Row Level Security stays enabled on every table, which the migration
-// already does.
-//
-// AI provider keys stay blank on purpose (see docs/PLAN.md, section 16 in the
-// original brief: "Do not block development"). With AI_PROVIDER left as
-// "local", the site runs the deterministic compliance engine only and never
-// calls Gemini or Qwen, so no key is required to use the app end to end.
+// Runtime configuration for the static frontend.
+// The anon/publishable key is safe to expose in browser code when RLS is enabled.
+// Never place a Supabase service-role key in this file.
 window.APP_CONFIG = {
-  SUPABASE_URL: "",           // e.g. "https://xkqsecpsuynljckbnzsu.supabase.co"
-  SUPABASE_ANON_KEY: "",      // Project Settings -> API -> anon public key
+  SUPABASE_URL: "https://xkqsecpsuynljckbnzsu.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhrcXNlY3BzdXlubGpja2JuenN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1NDcxNzEsImV4cCI6MjEwMjEyMzE3MX0.tQ7h2B59IQPGHHY3sCB590r05VfOKyJXvkm9_htL-zI",
 
-  AI_PROVIDER: "local",       // "local" | "gemini" | "qwen"  (gemini/qwen are stubs until keys are added)
+  AI_PROVIDER: "local",
   GEMINI_API_KEY: "",
   GEMINI_MODEL: "",
   QWEN_API_BASE_URL: "",
