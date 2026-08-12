@@ -1,12 +1,12 @@
 const modules = [
   { href: "dashboard.html", label: "Dashboard", icon: "⌂" },
   { href: "applications.html", label: "Applications", icon: "▤" },
-  { href: "module.html?module=students", label: "Students", icon: "◎" },
-  { href: "module.html?module=universities", label: "Universities", icon: "◇" },
-  { href: "module.html?module=countries", label: "Countries", icon: "◌" },
-  { href: "module.html?module=programmes", label: "Programmes", icon: "▦" },
+  { href: "reference-data.html?type=students", label: "Students", icon: "◎" },
+  { href: "reference-data.html?type=universities", label: "Universities", icon: "◇" },
+  { href: "reference-data.html?type=countries", label: "Countries", icon: "◌" },
+  { href: "reference-data.html?type=programmes", label: "Programmes", icon: "▦" },
   { href: "document-types.html", label: "Document types", icon: "▱" },
-  { href: "module.html?module=compliance-rules", label: "Compliance rules", icon: "✓" },
+  { href: "compliance-rules.html", label: "Compliance rules", icon: "✓" },
   { href: "module.html?module=reports", label: "Reports", icon: "▥" },
 ];
 

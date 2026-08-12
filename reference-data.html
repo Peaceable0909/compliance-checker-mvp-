@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reference data — Compliance Checker</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="dashboard-hero">
+      <div><div class="dashboard-kicker" id="page-kicker">Reference data</div><h1 id="page-title">Reference data</h1><p id="page-description">Create and manage reusable records for compliance reviews.</p></div>
+      <div class="dashboard-hero-action"><button id="new-record-btn">New record</button></div>
+    </div>
+    <div id="notice-slot"></div>
+
+    <section class="panel" id="record-form-panel" hidden>
+      <div class="panel-head"><div><div class="eyebrow">Record editor</div><h2 id="form-title">Create record</h2></div><button id="close-form-btn" class="secondary">Close</button></div>
+      <form id="record-form"><div id="dynamic-fields" class="rule-builder-grid"></div><div class="rule-builder-actions"><button type="button" id="cancel-record-btn" class="secondary">Cancel</button><button type="submit">Save record</button></div></form>
+    </section>
+
+    <section class="panel"><div class="panel-head"><div><div class="eyebrow" id="list-kicker">Records</div><h2 id="list-title">Records</h2></div><input id="search-input" style="max-width:230px;" placeholder="Search records" /></div><div id="record-list" class="dashboard-list"><p style="color:var(--ink-soft);">Loading…</p></div></section>
+  </div>
+
+  <script src="assets/config.js"></script>
+  <script type="module">
+    import { requireSession, wireTopbar } from "./assets/auth.js";
+    import { renderTopbar } from "./assets/topbar.js";
+    import { supabase } from "./assets/supabase-client.js";
+
+    const configs = {
+      students: { table: "students", title: "Students", singular: "student", kicker: "Applicant records", description: "Create reusable applicant profiles and keep identity details consistent across applications.", fields: [{ key: "full_name", label: "Full name", type: "text", required: true }, { key: "date_of_birth", label: "Date of birth", type: "date" }, { key: "nationality", label: "Nationality", type: "text" }, { key: "passport_number", label: "Passport number", type: "text" }, { key: "email", label: "Email", type: "email" }, { key: "phone", label: "Phone", type: "text" }, { key: "address", label: "Address", type: "text" }] },
+      countries: { table: "countries", title: "Countries", singular: "country", kicker: "Reference data", description: "Define country-level compliance context and visa-related requirements.", fields: [{ key: "name", label: "Country name", type: "text", required: true }, { key: "code", label: "Country code", type: "text" }, { key: "requirements_notes", label: "Requirements notes", type: "textarea", full: true }] },
+      universities: { table: "universities", title: "Universities", singular: "university", kicker: "Reference data", description: "Manage institutions and the requirements that apply across their programmes.", fields: [{ key: "name", label: "University name", type: "text", required: true }, { key: "country_id", label: "Country", type: "select", source: "countries", required: true }, { key: "requirements_notes", label: "Requirements notes", type: "textarea", full: true }] },
+      programmes: { table: "programmes", title: "Programmes", singular: "programme", kicker: "Reference data", description: "Manage programmes, study levels, and programme-specific requirements.", fields: [{ key: "name", label: "Programme name", type: "text", required: true }, { key: "university_id", label: "University", type: "select", source: "universities", required: true }, { key: "level", label: "Study level", type: "select", options: ["Bachelor's / BSc", "Master's / MSc", "PhD", "MBA", "LLM", "MA", "MPhil", "Foundation", "Pre-Master's", "Other"] }, { key: "requirements_notes", label: "Requirements notes", type: "textarea", full: true }] },
+    };
+
+    const type = new URLSearchParams(window.location.search).get("type") || "students";
+    const config = configs[type] || configs.students;
+    document.title = `${config.title} — Compliance Checker`;
+    document.getElementById("page-kicker").textContent = config.kicker;
+    document.getElementById("page-title").textContent = config.title;
+    document.getElementById("page-description").textContent = config.description;
+    document.getElementById("list-kicker").textContent = config.title;
+    document.getElementById("list-title").textContent = `Manage ${config.title.toLowerCase()}`;
+    renderTopbar(`reference-data.html?type=${type}`);
+
+    const session = await requireSession();
+    let userId = null;
+    let records = [];
+    let editingId = null;
+    const $ = (id) => document.getElementById(id);
+    const noticeSlot = $("notice-slot");
+    const formPanel = $("record-form-panel");
+
+    if (session) {
+      wireTopbar(session.user.email);
+      userId = session.user.id;
+      await buildFields();
+      await loadRecords();
+      $("new-record-btn").addEventListener("click", () => openForm());
+      $("close-form-btn").addEventListener("click", closeForm);
+      $("cancel-record-btn").addEventListener("click", closeForm);
+      $("record-form").addEventListener("submit", saveRecord);
+      $("search-input").addEventListener("input", renderRecords);
+    }
+
+    function showNotice(kind, message) { noticeSlot.innerHTML = `<div class="notice ${kind}">${message}</div>`; }
+    function esc(value) { return String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" }[c])); }
+    function notesFor(record) { return record.requirements?.notes || ""; }
+
+    async function buildFields() {
+      const sourceCache = {};
+      const fieldHtml = [];
+      for (const field of config.fields) {
+        let input = "";
+        if (field.type === "textarea") input = `<textarea id="field-${field.key}" rows="4" placeholder="Add structured guidance, source notes, deadlines, and exceptions."></textarea>`;
+        else if (field.type === "select") {
+          if (!sourceCache[field.source]) { const { data } = await supabase.from(field.source).select("id, name").order("name"); sourceCache[field.source] = data || []; }
+          input = `<select id="field-${field.key}"><option value="">Select a value</option>${sourceCache[field.source].map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join("")}</select>`;
+        } else if (field.options) input = `<select id="field-${field.key}"><option value="">Select a level</option>${field.options.map((option) => `<option value="${esc(option)}">${esc(option)}</option>`).join("")}</select>`;
+        else input = `<input id="field-${field.key}" type="${field.type}" />`;
+        fieldHtml.push(`<div class="field ${field.full ? "full" : ""}"><label for="field-${field.key}">${field.label}${field.required ? " *" : ""}</label>${input}</div>`);
+      }
+      $("dynamic-fields").innerHTML = fieldHtml.join("");
+    }
+
+    async function loadRecords() {
+      let query = supabase.from(config.table).select("*").order(config.table === "students" ? "full_name" : "name");
+      if (config.table === "students") query = query.eq("owner_id", userId);
+      const { data, error } = await query;
+      if (error) { showNotice("error", error.message); return; }
+      records = data || [];
+      renderRecords();
+    }
+
+    function labelFor(record) {
+      if (config.table === "students") return record.full_name;
+      return record.name;
+    }
+
+    function metaFor(record) {
+      if (config.table === "students") return [record.nationality, record.passport_number, record.email].filter(Boolean).join(" · ") || "No contact details";
+      if (config.table === "countries") return [record.code, notesFor(record) ? "requirements notes" : null].filter(Boolean).join(" · ") || "No code or requirements notes";
+      if (config.table === "universities") return `${record.country_id ? "Country linked" : "Country not set"}${notesFor(record) ? " · requirements notes" : ""}`;
+      return `${record.level || "Study level not set"}${record.university_id ? " · university linked" : ""}${notesFor(record) ? " · requirements notes" : ""}`;
+    }
+
+    function renderRecords() {
+      const needle = $("search-input").value.toLowerCase().trim();
+      const visible = records.filter((record) => `${labelFor(record)} ${metaFor(record)}`.toLowerCase().includes(needle));
+      const target = $("record-list");
+      if (!visible.length) { target.innerHTML = `<div class="empty-state">No ${config.title.toLowerCase()} found. Create the first record above.</div>`; return; }
+      target.innerHTML = visible.map((record) => `<div class="dashboard-list-item"><div><div class="title">${esc(labelFor(record))}</div><div class="meta">${esc(metaFor(record))}</div></div><div class="right"><button class="secondary" data-edit="${record.id}">Edit</button></div></div>`).join("");
+      target.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(records.find((record) => record.id === button.dataset.edit))));
+    }
+
+    function openForm(record = null) {
+      editingId = record?.id || null;
+      $("form-title").textContent = record ? `Edit ${config.singular}` : `Create ${config.singular}`;
+      formPanel.hidden = false;
+      for (const field of config.fields) {
+        const element = $(`field-${field.key}`);
+        if (!element) continue;
+        element.value = field.key === "requirements_notes" ? notesFor(record || {}) : (record?.[field.key] || "");
+      }
+    }
+
+    function closeForm() { editingId = null; formPanel.hidden = true; $("record-form").reset(); }
+
+    async function saveRecord(event) {
+      event.preventDefault();
+      const payload = {};
+      for (const field of config.fields) { const value = $(`field-${field.key}`).value.trim(); if (field.required && !value) { showNotice("error", `${field.label} is required.`); return; } if (field.key !== "requirements_notes") payload[field.key] = value || null; }
+      const notes = $("field-requirements_notes")?.value.trim() || "";
+      if (["countries", "universities", "programmes"].includes(type)) payload.requirements = { ...(editingId ? (records.find((record) => record.id === editingId)?.requirements || {}) : {}), notes };
+      if (!editingId) payload.owner_id = userId;
+      const query = editingId ? supabase.from(config.table).update(payload).eq("id", editingId) : supabase.from(config.table).insert(payload);
+      const { error } = await query;
+      if (error) { showNotice("error", error.message); return; }
+      showNotice("ok", `${config.singular[0].toUpperCase() + config.singular.slice(1)} saved.`); closeForm(); await loadRecords();
+    }
+  </script>
+</body>
+</html>

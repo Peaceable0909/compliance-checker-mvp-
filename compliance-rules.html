@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compliance rules — Compliance Checker</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="dashboard-hero">
+      <div>
+        <div class="dashboard-kicker">Decision controls</div>
+        <h1>Compliance rules</h1>
+        <p>Build explainable checks without changing application code. Rules can target a document type, country, university, programme, or individual application.</p>
+      </div>
+      <div class="dashboard-hero-action"><button id="new-rule-btn">New rule</button></div>
+    </div>
+    <div id="notice-slot"></div>
+
+    <section class="panel" id="rule-form-panel" hidden>
+      <div class="panel-head"><div><div class="eyebrow" id="form-eyebrow">Rule builder</div><h2 id="form-title">Create a compliance rule</h2></div><button id="close-form-btn" class="secondary">Close</button></div>
+      <form id="rule-form">
+        <div class="rule-builder-grid">
+          <div class="rule-builder-section full">
+            <h3>Rule identity</h3>
+            <div class="grid-2">
+              <div class="field"><label for="rule-name">Rule name</label><input id="rule-name" required placeholder="Passport expiry check" /></div>
+              <div class="field"><label for="rule-key">Rule key</label><input id="rule-key" required placeholder="passport_expiry" /></div>
+              <div class="field"><label for="rule-scope">Applies to</label><select id="rule-scope"><option value="general">General compliance</option><option value="document_type">Document type</option><option value="country">Country</option><option value="university">University</option><option value="programme">Programme</option><option value="application">Specific application</option></select></div>
+              <div class="field" id="target-field" hidden><label for="rule-target">Target</label><select id="rule-target"></select></div>
+              <div class="field"><label for="rule-category">Category</label><select id="rule-category"><option>identity</option><option>academic</option><option>financial</option><option>immigration</option><option>english_language</option><option>document_authenticity</option><option>date_consistency</option><option>name_consistency</option><option>address_consistency</option><option>academic_history</option><option>employment_history</option><option>sponsor_consistency</option><option>missing_evidence</option><option>duplicate_documents</option><option>translation</option><option>general</option></select></div>
+              <div class="field"><label for="rule-priority">Priority</label><input id="rule-priority" type="number" min="1" step="1" value="100" /></div>
+            </div>
+          </div>
+
+          <div class="rule-builder-section">
+            <h3>When</h3>
+            <div class="field"><label for="condition-field">Check</label><select id="condition-field"><option value="required_field">Required field</option><option value="date_check">Date check</option><option value="expiry_check">Expiry check</option><option value="name_consistency">Name consistency</option><option value="number_consistency">Number consistency</option><option value="minimum_value">Minimum value</option><option value="maximum_value">Maximum value</option><option value="keyword_check">Keyword check</option><option value="content_requirement">Content requirement</option><option value="cross_document">Cross-document comparison</option><option value="ai_interpretation">AI interpretation</option><option value="human_review">Human review required</option></select></div>
+            <div class="field"><label for="condition-operator">Condition</label><select id="condition-operator"><option value="equals">Equals</option><option value="not_equals">Does not equal</option><option value="greater_than">Greater than</option><option value="less_than">Less than</option><option value="contains">Contains</option><option value="matches">Matches</option><option value="exists">Exists</option><option value="missing">Is missing</option><option value="must_be_relevant">Must be relevant to selected programme</option></select></div>
+            <div class="field"><label for="condition-value">Value or instruction</label><textarea id="condition-value" rows="4" placeholder="6 months, IELTS 6.5, or a plain-language instruction"></textarea></div>
+          </div>
+
+          <div class="rule-builder-section">
+            <h3>Then</h3>
+            <div class="field"><label for="rule-severity">Priority level</label><select id="rule-severity"><option value="critical">Critical — RED</option><option value="warning">Important — YELLOW</option><option value="info">Informational — GREEN / INFO</option><option value="manual_review">Manual review</option></select></div>
+            <div class="field"><label for="action-message">Finding message</label><textarea id="action-message" rows="4" required placeholder="Applicant has an employment gap of more than 6 months. Review the gap and determine whether an explanation is required."></textarea></div>
+            <div class="field"><label for="action-recommendation">Recommended next action</label><textarea id="action-recommendation" rows="3" placeholder="Request supporting evidence or explanation."></textarea></div>
+          </div>
+
+          <div class="rule-builder-section full">
+            <h3>Governance</h3>
+            <div class="grid-2">
+              <div class="field"><label for="source-type">Rule source</label><select id="source-type"><option value="general_compliance">General compliance rule</option><option value="document_type_requirement">Document type requirement</option><option value="country_requirement">Country requirement</option><option value="university_requirement">University requirement</option><option value="programme_requirement">Programme requirement</option><option value="application_override">Application-specific override</option></select></div>
+              <div class="field"><label for="source-reference">Source/reference</label><input id="source-reference" placeholder="Admissions policy URL or internal reference" /></div>
+              <div class="field"><label for="effective-from">Effective from</label><input id="effective-from" type="date" /></div>
+              <div class="field"><label for="effective-until">Effective until</label><input id="effective-until" type="date" /></div>
+              <div class="field"><label for="rule-version">Version</label><input id="rule-version" type="number" min="1" value="1" /></div>
+              <div class="field"><label><input id="rule-enabled" type="checkbox" checked style="width:auto; display:inline-block; margin-right:6px;" />Enabled</label></div>
+              <div class="field full"><label for="rule-notes">Notes</label><textarea id="rule-notes" rows="3" placeholder="Explain how this rule should be interpreted or maintained."></textarea></div>
+            </div>
+          </div>
+        </div>
+        <div class="rule-builder-actions"><button type="button" id="cancel-rule-btn" class="secondary">Cancel</button><button type="submit" id="save-rule-btn">Save rule</button></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><div class="eyebrow">Rule catalog</div><h2>Active and versioned checks</h2></div><div class="field" style="margin:0; min-width:180px;"><select id="filter-scope"><option value="">All scopes</option><option value="general">General</option><option value="document_type">Document type</option><option value="country">Country</option><option value="university">University</option><option value="programme">Programme</option><option value="application">Application</option></select></div></div>
+      <div id="rule-list" class="rule-list"><p style="color:var(--ink-soft);">Loading rules…</p></div>
+    </section>
+  </div>
+
+  <script src="assets/config.js"></script>
+  <script type="module">
+    import { requireSession, wireTopbar } from "./assets/auth.js";
+    import { renderTopbar } from "./assets/topbar.js";
+    import { supabase } from "./assets/supabase-client.js";
+
+    renderTopbar("compliance-rules.html");
+    const session = await requireSession();
+    let userId = null;
+    let rules = [];
+    let editingId = null;
+    const targets = { document_type: [], country: [], university: [], programme: [], application: [] };
+    const labelMap = { document_type: "Document type", country: "Country", university: "University", programme: "Programme", application: "Application" };
+    const $ = (id) => document.getElementById(id);
+    const noticeSlot = $("notice-slot");
+    const formPanel = $("rule-form-panel");
+    const form = $("rule-form");
+
+    const requestedScope = new URLSearchParams(window.location.search).get("scope");
+    if (requestedScope && $("filter-scope").querySelector(`option[value="${requestedScope}"]`)) $("filter-scope").value = requestedScope;
+
+    if (session) {
+      wireTopbar(session.user.email);
+      userId = session.user.id;
+      await loadTargets();
+      await loadRules();
+      $("new-rule-btn").addEventListener("click", () => openForm());
+      $("close-form-btn").addEventListener("click", closeForm);
+      $("cancel-rule-btn").addEventListener("click", closeForm);
+      $("rule-scope").addEventListener("change", updateTargetOptions);
+      $("filter-scope").addEventListener("change", renderRules);
+      form.addEventListener("submit", saveRule);
+    }
+
+    function showNotice(kind, message) { noticeSlot.innerHTML = `<div class="notice ${kind}">${message}</div>`; }
+    function esc(value) { return String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" }[c])); }
+    function slug(value) { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, ""); }
+    function statusClass(severity) { return severity === "critical" ? "critical" : severity === "warning" ? "warning" : severity === "manual_review" ? "info" : "accepted"; }
+
+    async function loadTargets() {
+      const queries = await Promise.all([
+        supabase.from("document_types").select("id, name").order("name"),
+        supabase.from("countries").select("id, name").order("name"),
+        supabase.from("universities").select("id, name").order("name"),
+        supabase.from("programmes").select("id, name, level").order("name"),
+        supabase.from("applications").select("id, intake, students(full_name)").eq("owner_id", userId).order("created_at", { ascending: false }),
+      ]);
+      const keys = ["document_type", "country", "university", "programme", "application"];
+      queries.forEach((result, index) => { targets[keys[index]] = result.data || []; });
+      updateTargetOptions();
+    }
+
+    function targetLabel(scope, item) {
+      if (scope === "programme") return `${item.name}${item.level ? ` · ${item.level}` : ""}`;
+      if (scope === "application") return `${item.students?.full_name || "Unnamed student"} · ${item.intake || "Intake TBD"}`;
+      return item.name;
+    }
+
+    function updateTargetOptions() {
+      const scope = $("rule-scope").value;
+      const field = $("target-field");
+      const select = $("rule-target");
+      if (scope === "general") { field.hidden = true; select.innerHTML = ""; return; }
+      field.hidden = false;
+      select.innerHTML = targets[scope].length ? targets[scope].map((item) => `<option value="${item.id}">${esc(targetLabel(scope, item))}</option>`).join("") : `<option value="">No ${labelMap[scope].toLowerCase()} records yet</option>`;
+    }
+
+    async function loadRules() {
+      const { data, error } = await supabase.from("compliance_requirements").select("*").order("priority").order("created_at", { ascending: false });
+      if (error) { showNotice("error", error.message); return; }
+      rules = data || [];
+      renderRules();
+    }
+
+    function renderRules() {
+      const filter = $("filter-scope").value;
+      const visible = filter ? rules.filter((rule) => rule.scope === filter) : rules;
+      const target = $("rule-list");
+      if (!visible.length) { target.innerHTML = `<div class="empty-state">No rules in this scope yet. Create the first rule with the builder above.</div>`; return; }
+      target.innerHTML = visible.map((rule) => {
+        const action = rule.action_config || {};
+        const condition = rule.condition_config || {};
+        return `<article class="rule-card ${rule.is_enabled ? "" : "is-disabled"}">
+          <div class="rule-card-head"><div><div class="rule-card-title">${esc(rule.name)}</div><div class="rule-card-meta"><span class="badge ${statusClass(rule.severity)}">${esc(rule.severity)}</span><span class="badge info">${esc(rule.scope)}</span><span class="badge info">v${esc(rule.version)}</span><span class="badge ${rule.is_enabled ? "accepted" : "dismissed"}">${rule.is_enabled ? "enabled" : "disabled"}</span></div></div><div class="rule-card-actions"><button class="secondary" data-edit="${rule.id}">Edit</button><button class="secondary" data-toggle="${rule.id}">${rule.is_enabled ? "Disable" : "Enable"}</button><button class="secondary" data-delete="${rule.id}">Delete</button></div></div>
+          <p class="rule-card-message">${esc(action.message || rule.name)}</p>
+          <div class="rule-card-source">${esc(rule.source_type || "Unspecified source")} · priority ${esc(rule.priority)} · ${esc(condition.field || rule.rule_key)} ${esc(condition.operator || "")} ${esc(condition.value || "")}</div>
+        </article>`;
+      }).join("");
+      target.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(rules.find((rule) => rule.id === button.dataset.edit))));
+      target.querySelectorAll("[data-toggle]").forEach((button) => button.addEventListener("click", () => toggleRule(button.dataset.toggle)));
+      target.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => deleteRule(button.dataset.delete)));
+    }
+
+    function openForm(rule = null) {
+      editingId = rule?.id || null;
+      $("form-title").textContent = rule ? "Edit compliance rule" : "Create a compliance rule";
+      $("form-eyebrow").textContent = rule ? "Versioned rule editor" : "Rule builder";
+      formPanel.hidden = false;
+      if (!rule) { form.reset(); $("rule-priority").value = 100; $("rule-version").value = 1; $("rule-enabled").checked = true; updateTargetOptions(); return; }
+      const condition = rule.condition_config || {};
+      const action = rule.action_config || {};
+      $("rule-name").value = rule.name || ""; $("rule-key").value = rule.rule_key || ""; $("rule-scope").value = rule.scope || "general"; updateTargetOptions(); $("rule-target").value = rule[`${rule.scope}_id`] || "";
+      $("rule-category").value = rule.category || "general"; $("rule-priority").value = rule.priority || 100; $("condition-field").value = condition.field || "required_field"; $("condition-operator").value = condition.operator || "equals"; $("condition-value").value = condition.value || "";
+      $("rule-severity").value = rule.severity || "critical"; $("action-message").value = action.message || ""; $("action-recommendation").value = action.recommendation || ""; $("source-type").value = rule.source_type || "general_compliance"; $("source-reference").value = rule.source_reference || ""; $("effective-from").value = rule.effective_from || ""; $("effective-until").value = rule.effective_until || ""; $("rule-version").value = rule.version || 1; $("rule-enabled").checked = rule.is_enabled !== false; $("rule-notes").value = rule.notes || "";
+    }
+
+    function closeForm() { editingId = null; formPanel.hidden = true; form.reset(); }
+
+    async function saveRule(event) {
+      event.preventDefault();
+      const scope = $("rule-scope").value;
+      const targetId = scope === "general" ? null : $("rule-target").value || null;
+      if (scope !== "general" && !targetId) { showNotice("error", `Create a ${labelMap[scope].toLowerCase()} before attaching this rule.`); return; }
+      const rule = { owner_id: userId, name: $("rule-name").value.trim(), rule_key: slug($("rule-key").value.trim() || $("rule-name").value), scope, category: $("rule-category").value, severity: $("rule-severity").value, status: $("rule-enabled").checked ? "active" : "inactive", version: Number($("rule-version").value) || 1, effective_from: $("effective-from").value || null, effective_until: $("effective-until").value || null, source_type: $("source-type").value, source_reference: $("source-reference").value.trim() || null, notes: $("rule-notes").value.trim() || null, updated_by: userId, condition_config: { field: $("condition-field").value, operator: $("condition-operator").value, value: $("condition-value").value.trim() || null }, action_config: { severity: $("rule-severity").value, message: $("action-message").value.trim(), recommendation: $("action-recommendation").value.trim() || null }, rule_config: { field: $("condition-field").value, operator: $("condition-operator").value, value: $("condition-value").value.trim() || null }, priority: Number($("rule-priority").value) || 100, is_enabled: $("rule-enabled").checked };
+      rule.document_type_id = scope === "document_type" ? targetId : null; rule.country_id = scope === "country" ? targetId : null; rule.university_id = scope === "university" ? targetId : null; rule.programme_id = scope === "programme" ? targetId : null; rule.application_id = scope === "application" ? targetId : null;
+      const query = editingId ? supabase.from("compliance_requirements").update(rule).eq("id", editingId) : supabase.from("compliance_requirements").insert(rule);
+      const { error } = await query;
+      if (error) { showNotice("error", error.message); return; }
+      showNotice("ok", editingId ? "Rule updated." : "Rule created."); closeForm(); await loadRules();
+    }
+
+    async function toggleRule(id) {
+      const rule = rules.find((item) => item.id === id); if (!rule) return;
+      const { error } = await supabase.from("compliance_requirements").update({ is_enabled: !rule.is_enabled, status: !rule.is_enabled ? "active" : "inactive", updated_by: userId }).eq("id", id);
+      if (error) { showNotice("error", error.message); return; } await loadRules();
+    }
+
+    async function deleteRule(id) {
+      if (!window.confirm("Delete this rule? This cannot be undone.")) return;
+      const { error } = await supabase.from("compliance_requirements").delete().eq("id", id);
+      if (error) { showNotice("error", error.message); return; } showNotice("ok", "Rule deleted."); await loadRules();
+    }
+  </script>
+</body>
+</html>

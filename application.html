@@ -77,7 +77,7 @@
     function slug(name) { return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
     function stampClass(status) { return status === "green" ? "green" : status === "yellow" ? "yellow" : status === "red" ? "red" : "grey"; }
 
-    let userId, application, student, documentTypes = [], documents = [], extractionsByDoc = {};
+    let userId, application, student, documentTypes = [], documents = [], rules = [], extractionsByDoc = {};
 
     if (session) {
       wireTopbar(session.user.email);
@@ -102,6 +102,9 @@
 
       const { data: types } = await supabase.from("document_types").select("*").order("name");
       documentTypes = types || [];
+      const { data: configuredRules, error: rulesError } = await supabase.from("compliance_requirements").select("*").eq("is_enabled", true).order("priority");
+      if (rulesError) { showNotice("error", rulesError.message); return; }
+      rules = configuredRules || [];
 
       await loadDocuments();
       await loadLatestRun();
@@ -290,6 +293,7 @@
           return {
             id: d.id,
             fileName: d.file_name,
+            documentTypeId: d.document_type_id,
             selectedType: type?.name || d.detected_document_type || "unknown",
             extraction: ex ? ex.extracted_data : null,
           };
@@ -297,10 +301,17 @@
 
         const input = {
           applicationId,
-          application: { dateOfBirth: student?.date_of_birth || null, passportNumber: student?.passport_number || null },
+          application: {
+            dateOfBirth: student?.date_of_birth || null,
+            passportNumber: student?.passport_number || null,
+            countryId: application.country_id,
+            universityId: application.university_id,
+            programmeId: application.programme_id,
+          },
           documents: engineDocs,
           requiredDocumentTypes: requiredTypes,
           requirements: {},
+          rules,
         };
 
         const provider = getComplianceProvider();

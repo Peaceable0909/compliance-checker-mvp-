@@ -48,6 +48,53 @@ function fieldValue(documents, type, field) {
   return doc?.extraction?.[field];
 }
 
+function activeRule(rule, today = new Date().toISOString().slice(0, 10)) {
+  return rule?.is_enabled !== false && (!rule.effective_from || rule.effective_from <= today) && (!rule.effective_until || rule.effective_until >= today);
+}
+
+function ruleMatchesApplication(rule, input) {
+  const app = input.application || {};
+  if (rule.scope === "general") return true;
+  if (rule.scope === "country") return rule.country_id && rule.country_id === app.countryId;
+  if (rule.scope === "university") return rule.university_id && rule.university_id === app.universityId;
+  if (rule.scope === "programme") return rule.programme_id && rule.programme_id === app.programmeId;
+  if (rule.scope === "application") return rule.application_id && rule.application_id === input.applicationId;
+  return true;
+}
+
+function configuredRuleSeverity(rule) {
+  return rule.severity === "warning" || rule.severity === "info" ? rule.severity : "critical";
+}
+
+function evaluateConfiguredRules(findings, input) {
+  for (const rule of (input.rules || []).filter(activeRule).sort((a, b) => (a.priority || 100) - (b.priority || 100))) {
+    if (!ruleMatchesApplication(rule, input)) continue;
+    const condition = rule.condition_config || rule.rule_config || {};
+    const action = rule.action_config || {};
+    const severity = configuredRuleSeverity(rule);
+    const targetDocuments = rule.scope === "document_type"
+      ? input.documents.filter((doc) => doc.documentTypeId === rule.document_type_id)
+      : input.documents;
+
+    if (condition.field === "required_field" && condition.operator === "missing") {
+      for (const document of targetDocuments) {
+        if (!document.extraction || !condition.value || !document.extraction[condition.value]) {
+          addFinding(findings, input, rule.rule_key || "configured_required_field", severity, action.message || `${rule.name} was not satisfied.`, { ruleId: rule.id, ruleName: rule.name, field: condition.value, fileName: document.fileName }, { documentId: document.id, expectedValue: condition.value, recommendation: action.recommendation || null, confidence: 1 });
+        }
+      }
+    } else if (condition.field === "expiry_check" && condition.value) {
+      for (const document of targetDocuments) {
+        const expiryDate = document.extraction?.expiryDate;
+        if (expiryDate && expiryDate < condition.value) {
+          addFinding(findings, input, rule.rule_key || "configured_expiry_check", severity, action.message || `${document.fileName} does not meet the expiry requirement.`, { ruleId: rule.id, ruleName: rule.name, expiryDate, requiredDate: condition.value }, { documentId: document.id, expectedValue: condition.value, actualValue: expiryDate, recommendation: action.recommendation || null, confidence: 1 });
+        }
+      }
+    } else if (condition.field === "human_review") {
+      addFinding(findings, input, rule.rule_key || "configured_human_review", "warning", action.message || `${rule.name} requires human review.`, { ruleId: rule.id, ruleName: rule.name, condition }, { recommendation: action.recommendation || "Review this rule manually.", confidence: null });
+    }
+  }
+}
+
 export function evaluateCompliance(input) {
   const findings = [];
   const presentTypes = new Set(input.documents.map((d) => d.selectedType.toLowerCase()));
@@ -165,6 +212,8 @@ export function evaluateCompliance(input) {
       { expectedValue: "IELTS", recommendation: "Upload the required IELTS certificate." }
     );
   }
+
+  evaluateConfiguredRules(findings, input);
 
   const failed = findings.filter((f) => f.severity === "critical").length;
   const warnings = findings.filter((f) => f.severity === "warning").length;
