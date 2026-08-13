@@ -55,6 +55,7 @@
     import { supabase } from "./assets/supabase-client.js";
     import { getStorageProvider } from "./assets/providers/storage.js";
     import { getComplianceProvider } from "./assets/providers/compliance-ai.js";
+    import { buildNarrative } from "./assets/compliance-engine.js";
     import { getDocumentAIProvider } from "./assets/providers/document-ai.js";
 
     renderTopbar("applications.html");
@@ -391,37 +392,40 @@
       });
     }
 
+    function buildEngineInput() {
+      const requiredTypes = documentTypes.filter((t) => t.required_by_default).map((t) => t.name);
+      const engineDocs = documents.map((d) => {
+        const type = documentTypes.find((t) => t.id === d.document_type_id);
+        const ex = extractionsByDoc[d.id];
+        return {
+          id: d.id,
+          fileName: d.file_name,
+          documentTypeId: d.document_type_id,
+          selectedType: type?.name || d.detected_document_type || "unknown",
+          extraction: ex ? ex.extracted_data : null,
+        };
+      });
+      return {
+        applicationId,
+        application: {
+          dateOfBirth: student?.date_of_birth || null,
+          passportNumber: student?.passport_number || null,
+          countryId: application.country_id,
+          universityId: application.university_id,
+          programmeId: application.programme_id,
+          programmeName: application.programmes?.name || null,
+        },
+        documents: engineDocs,
+        requiredDocumentTypes: requiredTypes,
+        requirements: {},
+        rules,
+      };
+    }
+
     async function runComplianceCheck() {
       try {
         showNotice("queue", "Running compliance check…");
-        const requiredTypes = documentTypes.filter((t) => t.required_by_default).map((t) => t.name);
-
-        const engineDocs = documents.map((d) => {
-          const type = documentTypes.find((t) => t.id === d.document_type_id);
-          const ex = extractionsByDoc[d.id];
-          return {
-            id: d.id,
-            fileName: d.file_name,
-            documentTypeId: d.document_type_id,
-            selectedType: type?.name || d.detected_document_type || "unknown",
-            extraction: ex ? ex.extracted_data : null,
-          };
-        });
-
-        const input = {
-          applicationId,
-          application: {
-            dateOfBirth: student?.date_of_birth || null,
-            passportNumber: student?.passport_number || null,
-            countryId: application.country_id,
-            universityId: application.university_id,
-            programmeId: application.programme_id,
-          },
-          documents: engineDocs,
-          requiredDocumentTypes: requiredTypes,
-          requirements: {},
-          rules,
-        };
+        const input = buildEngineInput();
 
         const provider = getComplianceProvider();
         const rawResult = await provider.evaluate(input);
@@ -476,47 +480,39 @@
       if (!run) return;
       const { data: findings } = await supabase
         .from("compliance_findings").select("*").eq("run_id", run.id).order("severity");
+      const savedFindings = (findings || []).map((f) => ({
+        findingType: f.finding_type, severity: f.severity, state: f.state, description: f.description,
+        documentId: f.document_id, relatedDocumentId: f.related_document_id, evidence: f.evidence,
+        expectedValue: f.expected_value, actualValue: f.actual_value,
+        recommendation: f.recommendation, confidence: f.confidence,
+      }));
+      const score = Math.max(0, Math.round(100 - (application.failed_count || 0) * 15 - (application.warning_count || 0) * 5));
+      const narrative = buildNarrative(buildEngineInput(), savedFindings, { score, status: application.overall_status });
       renderRunSummary({
         documentsChecked: application.documents_checked, passed: application.passed_count,
         warnings: application.warning_count, failed: application.failed_count, missing: application.missing_count,
+        score, status: application.overall_status, narrative,
       });
-      renderFindings((findings || []).map((f) => ({
-        findingType: f.finding_type, severity: f.severity, state: f.state, description: f.description,
-        evidence: f.evidence, expectedValue: f.expected_value, actualValue: f.actual_value,
-        recommendation: f.recommendation, confidence: f.confidence,
-      })));
+      renderFindings(savedFindings);
     }
 
     function renderRunSummary(r) {
+      const narrative = r.narrative || { grade: r.score >= 90 ? "Excellent" : r.score >= 70 ? "Needs review" : r.score >= 40 ? "Significant issues" : "Critical issues", documentSummaries: [], crossDocumentSummary: "", observations: [] };
+      const scoreClass = stampClass(r.status);
       document.getElementById("run-summary").innerHTML = `
-        <div class="field-row mono" style="font-size:0.82rem; color:var(--ink-soft);">
-          <span>checked: ${r.documentsChecked}</span>
-          <span>passed: ${r.passed}</span>
-          <span>warnings: ${r.warnings}</span>
-          <span>failed: ${r.failed}</span>
-          <span>missing: ${r.missing}</span>
-        </div>`;
+        <div class="report-score-card">
+          <div><div class="eyebrow">Compliance score</div><div class="report-score ${scoreClass}">${r.score ?? "—"}%</div><div class="report-grade">${escapeHtml(narrative.grade)}</div></div>
+          <div class="field-row mono report-counts"><span>checked: ${r.documentsChecked ?? 0}</span><span>passed: ${r.passed ?? 0}</span><span>warnings: ${r.warnings ?? 0}</span><span>failed: ${r.failed ?? 0}</span><span>missing: ${r.missing ?? 0}</span></div>
+        </div>
+        <div class="report-section"><div class="eyebrow">Document summaries</div>${narrative.documentSummaries.length ? narrative.documentSummaries.map((doc) => `<div class="report-document"><div><strong>${escapeHtml(doc.fileName)}</strong><div class="meta">${escapeHtml(doc.selectedType)}</div></div><span class="badge ${doc.status}">${escapeHtml(doc.status)}</span><p>${escapeHtml(doc.line)}</p></div>`).join("") : `<p class="meta">Run compliance to generate a document-by-document summary.</p>`}</div>
+        <div class="report-section"><div class="eyebrow">Cross-document check</div><p>${escapeHtml(narrative.crossDocumentSummary || "No cross-document summary available yet.")}</p></div>
+        <div class="report-section"><div class="eyebrow">Observations</div><ul class="report-observations">${narrative.observations.length ? narrative.observations.map((observation) => `<li><span class="badge ${observation.severity}">${escapeHtml(observation.severity)}</span><span>${escapeHtml(observation.text)}${observation.recommendation ? ` <strong>Recommendation:</strong> ${escapeHtml(observation.recommendation)}` : ""}</span></li>`).join("") : `<li>No observations yet.</li>`}</ul></div>`;
     }
 
     function renderFindings(findings) {
       const el = document.getElementById("findings-table");
-      if (!findings.length) { el.innerHTML = `<div class="empty-state">No findings on record yet. Run a compliance check to generate structured findings.</div>`; return; }
-      el.innerHTML = `
-        <table>
-          <thead><tr><th>Severity</th><th>Type</th><th>Description</th><th>Expected</th><th>Actual</th><th>Recommendation</th><th>Evidence</th></tr></thead>
-          <tbody>
-            ${findings.map((f) => `
-              <tr>
-                <td><span class="badge ${f.severity}">${f.severity}</span></td>
-                <td class="mono">${f.findingType}</td>
-                <td>${f.description}</td>
-                <td>${f.expectedValue ?? "—"}</td>
-                <td>${f.actualValue ?? "—"}</td>
-                <td>${f.recommendation ?? "—"}</td>
-                <td><pre class="evidence-json">${JSON.stringify(f.evidence, null, 0)}</pre></td>
-              </tr>`).join("")}
-          </tbody>
-        </table>`;
+      if (!findings.length) { el.innerHTML = ""; return; }
+      el.innerHTML = `<details class="technical-details"><summary>Technical details</summary><table><thead><tr><th>Severity</th><th>Type</th><th>Description</th><th>Expected</th><th>Actual</th><th>Recommendation</th><th>Evidence</th></tr></thead><tbody>${findings.map((f) => `<tr><td><span class="badge ${f.severity}">${escapeHtml(f.severity)}</span></td><td class="mono">${escapeHtml(f.findingType)}</td><td>${escapeHtml(f.description)}</td><td>${escapeHtml(f.expectedValue ?? "—")}</td><td>${escapeHtml(f.actualValue ?? "—")}</td><td>${escapeHtml(f.recommendation ?? "—")}</td><td><pre class="evidence-json">${escapeHtml(JSON.stringify(f.evidence, null, 0))}</pre></td></tr>`).join("")}</tbody></table></details>`;
     }
   </script>
 </body>

@@ -253,6 +253,23 @@ export function evaluateCompliance(input) {
     );
   }
 
+  const priorField = fieldValue(input.documents, "transcript", "fieldOfStudy") || fieldValue(input.documents, "cv", "fieldOfStudy");
+  const targetProgramme = input.application?.programmeName;
+  if (priorField && targetProgramme) {
+    const stop = new Set(["of", "and", "in", "the", "a", "for", "with", "bsc", "msc", "ba", "ma", "degree", "hnd"]);
+    const words = (value) => new Set(String(value).toLowerCase().split(/[^a-z]+/).filter((word) => word.length > 2 && !stop.has(word)));
+    const previousWords = words(priorField);
+    const targetWords = words(targetProgramme);
+    if (![...previousWords].some((word) => targetWords.has(word))) {
+      addFinding(
+        findings, input, "programme_relevance_review", "warning",
+        `The applicant's prior field of study ("${priorField}") does not clearly relate to the target programme ("${targetProgramme}").`,
+        { priorField, targetProgramme },
+        { expectedValue: targetProgramme, actualValue: priorField, recommendation: "Confirm the progression rationale using the personal statement or academic reference." }
+      );
+    }
+  }
+
   evaluateConfiguredRules(findings, input);
 
   const failed = findings.filter((f) => f.severity === "critical").length;
@@ -260,6 +277,49 @@ export function evaluateCompliance(input) {
   const passed = Math.max(input.documents.length - failed - warnings, 0);
   const missing = findings.filter((f) => f.findingType.startsWith("missing_")).length;
   const status = failed > 0 ? "red" : warnings > 0 ? "yellow" : "green";
+  const score = Math.max(0, Math.round(100 - failed * 15 - warnings * 5));
+  const narrative = buildNarrative(input, findings, { score, status });
 
-  return { status, documentsChecked: input.documents.length, passed, warnings, failed, missing, findings };
+  return { status, score, documentsChecked: input.documents.length, passed, warnings, failed, missing, findings, narrative };
+}
+
+export function buildNarrative(input, findings, { score = 100, status = "green" } = {}) {
+  const byDoc = new Map();
+  for (const finding of findings) {
+    if (!finding.documentId) continue;
+    if (!byDoc.has(finding.documentId)) byDoc.set(finding.documentId, []);
+    byDoc.get(finding.documentId).push(finding);
+  }
+
+  const documentSummaries = input.documents.map((doc) => {
+    const docFindings = byDoc.get(doc.id) || [];
+    const critical = docFindings.filter((finding) => finding.severity === "critical");
+    const warnings = docFindings.filter((finding) => finding.severity === "warning");
+    let line;
+    if (!doc.extraction) line = "Uploaded, but not yet processed — this document cannot be fully checked yet.";
+    else if (critical.length) line = critical.map((finding) => finding.description).join(" ");
+    else if (warnings.length) line = warnings.map((finding) => finding.description).join(" ");
+    else line = `Looks consistent with a ${doc.selectedType} and matches the rest of the application. No issues found.`;
+    return { fileName: doc.fileName, selectedType: doc.selectedType, status: critical.length ? "red" : warnings.length || !doc.extraction ? "yellow" : "green", line };
+  });
+
+  const crossTypes = new Set(["name_mismatch", "date_of_birth_mismatch", "passport_number_mismatch"]);
+  const crossFindings = findings.filter((finding) => crossTypes.has(finding.findingType));
+  const crossDocumentSummary = crossFindings.length
+    ? crossFindings.map((finding) => finding.description).join(" ")
+    : input.documents.length > 1
+      ? "Identity details line up consistently across the documents provided."
+      : "Not enough documents have been uploaded to cross-check identity details against each other.";
+
+  const seen = new Set();
+  const observations = [];
+  for (const finding of [...findings].sort((a, b) => (a.severity === "critical" ? -1 : b.severity === "critical" ? 1 : 0))) {
+    if (seen.has(finding.description)) continue;
+    seen.add(finding.description);
+    observations.push({ severity: finding.severity, text: finding.description, recommendation: finding.recommendation || null });
+  }
+  if (!observations.length) observations.push({ severity: "info", text: "All uploaded documents are consistent with the application and no compliance issues were found.", recommendation: null });
+
+  const grade = score >= 90 ? "Excellent" : score >= 70 ? "Needs review" : score >= 40 ? "Significant issues" : "Critical issues";
+  return { score, status, grade, documentSummaries, crossDocumentSummary, observations };
 }
