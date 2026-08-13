@@ -65,10 +65,20 @@
 
     const noticeSlot = document.getElementById("notice-slot");
     function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" }[c])); }
     function slug(name) { return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
     function stampClass(status) { return status === "green" ? "green" : status === "yellow" ? "yellow" : status === "red" ? "red" : "grey"; }
 
     let userId, application, student, documentTypes = [], documents = [], rules = [], extractionsByDoc = {};
+    const processingDocuments = new Set();
+    const LOAD_TIMEOUT_MS = 15000;
+    const OCR_TIMEOUT_MS = 90000;
+
+    function withTimeout(promise, timeoutMs, label) {
+      let timer;
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), timeoutMs); });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
 
     if (session) {
       wireTopbar(session.user.email);
@@ -108,25 +118,40 @@
     }
 
     async function loadDocuments() {
-      const { data: docs, error } = await supabase
-        .from("documents").select("*").eq("application_id", applicationId).order("uploaded_at", { ascending: false });
-      if (error) { showNotice("error", error.message); return; }
-      documents = docs || [];
+      const container = document.getElementById("doctype-blocks");
+      try {
+        const { data: docs, error } = await withTimeout(
+          supabase.from("documents").select("*").eq("application_id", applicationId).order("uploaded_at", { ascending: false }),
+          LOAD_TIMEOUT_MS,
+          "Document list loading"
+        );
+        if (error) throw error;
+        documents = docs || [];
 
-      if (documents.length) {
-        const { data: extractions } = await supabase
-          .from("document_extractions").select("*").in("document_id", documents.map((d) => d.id)).order("created_at", { ascending: false });
-        extractionsByDoc = {};
-        for (const ex of extractions || []) {
-          if (!extractionsByDoc[ex.document_id]) extractionsByDoc[ex.document_id] = ex; // most recent first
+        if (documents.length) {
+          const { data: extractions, error: extractionError } = await withTimeout(
+            supabase.from("document_extractions").select("*").in("document_id", documents.map((d) => d.id)).order("created_at", { ascending: false }),
+            LOAD_TIMEOUT_MS,
+            "Document extraction loading"
+          );
+          if (extractionError) throw extractionError;
+          extractionsByDoc = {};
+          for (const ex of extractions || []) {
+            if (!extractionsByDoc[ex.document_id]) extractionsByDoc[ex.document_id] = ex;
+          }
+        } else {
+          extractionsByDoc = {};
         }
-      } else {
-        extractionsByDoc = {};
-      }
 
-      renderDoctypeBlocks();
-      const queuedDocuments = documents.filter((document) => document.processing_status === "queued" && !extractionsByDoc[document.id]);
-      for (const document of queuedDocuments) processDocument(document.id);
+        renderDoctypeBlocks();
+        const queuedDocuments = documents.filter((document) => document.processing_status === "queued" && !extractionsByDoc[document.id]);
+        for (const document of queuedDocuments) processDocument(document.id);
+      } catch (err) {
+        documents = [];
+        extractionsByDoc = {};
+        container.innerHTML = `<div class="notice error">Could not load documents: ${escapeHtml(err.message || "Unknown error")} <button class="secondary" id="retry-documents-btn" style="margin-left:8px;">Retry</button></div>`;
+        document.getElementById("retry-documents-btn")?.addEventListener("click", loadDocuments);
+      }
     }
 
     // Which document types currently have a block on screen: system types,
@@ -211,7 +236,8 @@
 
     async function processDocument(docId, uploadedFile = null) {
       const document = documents.find((item) => item.id === docId);
-      if (!document) return;
+      if (!document || processingDocuments.has(docId)) return;
+      processingDocuments.add(docId);
       try {
         showNotice("queue", `Processing ${document.file_name} automatically…`);
         const type = documentTypes.find((item) => item.id === document.document_type_id);
@@ -226,7 +252,11 @@
         let result;
         const isVisionDocument = document.mime_type === "application/pdf" || document.mime_type?.startsWith("image/");
         if (isVisionDocument && window.APP_CONFIG.OCR_FUNCTION_NAME) {
-          const response = await supabase.functions.invoke(window.APP_CONFIG.OCR_FUNCTION_NAME, { body: { document_id: docId, document_type: type?.name || document.detected_document_type || "document" } });
+          const response = await withTimeout(
+            supabase.functions.invoke(window.APP_CONFIG.OCR_FUNCTION_NAME, { body: { document_id: docId, document_type: type?.name || document.detected_document_type || "document" } }),
+            OCR_TIMEOUT_MS,
+            "Gemini OCR"
+          );
           if (response.error) throw response.error;
           result = response.data;
         } else {
@@ -246,7 +276,11 @@
         if (updateError) throw updateError;
         await loadDocuments();
       } catch (err) {
+        document.processing_status = "failed";
+        renderDoctypeBlocks();
         showNotice("error", `${document.file_name}: ${err.message || "Automatic processing failed."}`);
+      } finally {
+        processingDocuments.delete(docId);
       }
     }
 
