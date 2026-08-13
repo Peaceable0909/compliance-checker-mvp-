@@ -26,6 +26,7 @@
       <div class="panel-head"><h2>Add a custom document type</h2></div>
       <div class="field-row">
         <div class="field"><label for="dt-name">Name</label><input id="dt-name" placeholder="Father Sponsorship Letter" /></div>
+        <div class="field"><label for="dt-category">Category</label><select id="dt-category"><option>Other / Custom Documents</option><option>Identity and Personal Documents</option><option>Academic Documents</option><option>English Language Documents</option><option>CV and Employment Documents</option><option>Financial Documents</option><option>Sponsor Documents</option><option>University Application Documents</option><option>Admission Documents</option><option>Visa and Immigration Documents</option><option>UK-Specific Documents</option><option>Medical Documents</option><option>Legal and Supporting Documents</option><option>Family and Relationship Documents</option><option>Accommodation Documents</option><option>Travel Documents</option><option>Business Documents</option><option>Professional Qualification Documents</option><option>Research and PhD Documents</option><option>Portfolio and Creative Documents</option></select></div>
         <div class="field"><label for="dt-desc">Description (optional)</label><input id="dt-desc" placeholder="Signed sponsorship letter from a parent/guardian" /></div>
       </div>
       <button id="add-dt-btn">Add document type</button>
@@ -61,35 +62,40 @@
     function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
 
     async function loadTypes() {
-      const { data, error } = await supabase.from("document_types").select("id, name, description, is_system, required_by_default").order("name");
+      const { data, error } = await supabase.from("document_types").select("id, name, description, category, is_system, required_by_default").order("category").order("name");
       if (error) { showNotice("error", error.message); return; }
       const system = (data || []).filter((t) => t.is_system);
       const custom = (data || []).filter((t) => !t.is_system);
 
       document.getElementById("system-list").innerHTML = system.length
-        ? system.map(rowHtml).join("")
+        ? groupedHtml(system)
         : `<div class="empty-state">No system document types have been seeded yet. Ask an admin to add the standard set (Passport, Transcript, IELTS…), or add them here as custom types.</div>`;
 
       document.getElementById("custom-list").innerHTML = custom.length
-        ? custom.map(rowHtml).join("")
+        ? groupedHtml(custom)
         : `<div class="empty-state">No custom document types yet.</div>`;
+    }
+
+    function groupedHtml(types) {
+      const groups = new Map();
+      for (const type of types) { if (!groups.has(type.category || "Other / Custom Documents")) groups.set(type.category || "Other / Custom Documents", []); groups.get(type.category || "Other / Custom Documents").push(type); }
+      return [...groups.entries()].map(([category, rows]) => `<section class="panel" style="margin:12px 0; padding:14px;"><div class="eyebrow">${category}</div>${rows.map(rowHtml).join("")}</section>`).join("");
     }
 
     function rowHtml(t) {
       return `<div class="list-row">
-        <div>
-          <div class="title">${t.name}${t.required_by_default ? ' <span class="badge critical">required</span>' : ""}</div>
-          <div class="meta">${t.description ?? ""}</div>
-        </div>
+        <div><div class="title">${t.name}${t.required_by_default ? ' <span class="badge critical">required</span>' : ""}</div><div class="meta">${t.description ?? ""}</div></div>
+        <a class="btn secondary" href="compliance-rules.html?scope=document_type&target_id=${t.id}">What to look for</a>
       </div>`;
     }
 
     async function addType() {
       const name = document.getElementById("dt-name").value.trim();
+      const category = document.getElementById("dt-category").value;
       const description = document.getElementById("dt-desc").value.trim() || null;
       if (!name) { showNotice("error", "Name is required."); return; }
       const { error } = await supabase.from("document_types").insert({
-        owner_id: userId, name, description, is_system: false,
+        owner_id: userId, name, category, description, is_system: false,
       });
       if (error) { showNotice("error", error.message); return; }
       document.getElementById("dt-name").value = "";

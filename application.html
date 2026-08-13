@@ -26,7 +26,7 @@
     <div class="panel">
       <div class="panel-head">
         <span class="eyebrow">Documents</span>
-        <button id="add-doctype-btn" class="secondary">+ Use another document type</button>
+        <div class="field" style="margin:0; min-width:260px;"><label for="upload-type-select" style="display:none;">Document type</label><select id="upload-type-select"><option value="">Select document type to upload</option></select></div>
       </div>
       <div id="doctype-blocks"><p style="color:var(--ink-soft);">Loading…</p></div>
     </div>
@@ -70,6 +70,7 @@
     function stampClass(status) { return status === "green" ? "green" : status === "yellow" ? "yellow" : status === "red" ? "red" : "grey"; }
 
     let userId, application, student, documentTypes = [], documents = [], rules = [], extractionsByDoc = {};
+    const forcedVisible = new Set();
     const processingDocuments = new Set();
     const LOAD_TIMEOUT_MS = 15000;
     const OCR_TIMEOUT_MS = 90000;
@@ -85,7 +86,13 @@
       userId = session.user.id;
       await loadAll();
       document.getElementById("run-check-btn").addEventListener("click", runComplianceCheck);
-      document.getElementById("add-doctype-btn").addEventListener("click", promptAddDocType);
+      document.getElementById("upload-type-select").addEventListener("change", (event) => {
+        const typeId = event.target.value;
+        if (!typeId) return;
+        forcedVisible.add(typeId);
+        renderDoctypeBlocks();
+        event.target.value = "";
+      });
     }
 
     async function loadAll() {
@@ -103,6 +110,7 @@
 
       const { data: types } = await supabase.from("document_types").select("*").order("name");
       documentTypes = types || [];
+      populateUploadTypeSelect();
       const { data: configuredRules, error: rulesError } = await supabase.from("compliance_requirements").select("*").eq("is_enabled", true).order("priority");
       if (rulesError) { showNotice("error", rulesError.message); return; }
       rules = configuredRules || [];
@@ -154,14 +162,21 @@
       }
     }
 
-    // Which document types currently have a block on screen: system types,
+    function populateUploadTypeSelect() {
+      const select = document.getElementById("upload-type-select");
+      const groups = new Map();
+      for (const type of documentTypes) { const category = type.category || "Other / Custom Documents"; if (!groups.has(category)) groups.set(category, []); groups.get(category).push(type); }
+      select.innerHTML = `<option value="">Select document type to upload</option>` + [...groups.entries()].map(([category, rows]) => `<optgroup label="${escapeHtml(category)}">${rows.map((type) => `<option value="${type.id}">${escapeHtml(type.name)}</option>`).join("")}</optgroup>`).join("");
+    }
+
+    // Which document types currently have a block on screen: required types,
+
     // required types, any custom type that already has a document, and any
     // type the reviewer explicitly opened via "Use another document type".
-    const forcedVisible = new Set();
     function visibleTypes() {
       const withDocs = new Set(documents.map((d) => d.document_type_id));
       return documentTypes.filter(
-        (t) => t.is_system || t.required_by_default || withDocs.has(t.id) || forcedVisible.has(t.id)
+        (t) => t.required_by_default || withDocs.has(t.id) || forcedVisible.has(t.id)
       );
     }
 

@@ -89,7 +89,9 @@
     const formPanel = $("rule-form-panel");
     const form = $("rule-form");
 
-    const requestedScope = new URLSearchParams(window.location.search).get("scope");
+    const requestedParams = new URLSearchParams(window.location.search);
+    const requestedScope = requestedParams.get("scope");
+    const requestedTargetId = requestedParams.get("target_id");
     if (requestedScope && $("filter-scope").querySelector(`option[value="${requestedScope}"]`)) $("filter-scope").value = requestedScope;
 
     if (session) {
@@ -136,6 +138,7 @@
       if (scope === "general") { field.hidden = true; select.innerHTML = ""; return; }
       field.hidden = false;
       select.innerHTML = targets[scope].length ? targets[scope].map((item) => `<option value="${item.id}">${esc(targetLabel(scope, item))}</option>`).join("") : `<option value="">No ${labelMap[scope].toLowerCase()} records yet</option>`;
+      if (requestedTargetId && targets[scope].some((item) => item.id === requestedTargetId)) select.value = requestedTargetId;
     }
 
     async function loadRules() {
