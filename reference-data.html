@@ -49,6 +49,7 @@
     let userId = null;
     let records = [];
     let editingId = null;
+    let requirementDocumentTypes = [];
     const $ = (id) => document.getElementById(id);
     const noticeSlot = $("notice-slot");
     const formPanel = $("record-form-panel");
@@ -81,6 +82,14 @@
         } else if (field.options) input = `<select id="field-${field.key}"><option value="">Select a level</option>${field.options.map((option) => `<option value="${esc(option)}">${esc(option)}</option>`).join("")}</select>`;
         else input = `<input id="field-${field.key}" type="${field.type}" />`;
         fieldHtml.push(`<div class="field ${field.full ? "full" : ""}"><label for="field-${field.key}">${field.label}${field.required ? " *" : ""}</label>${input}</div>`);
+      }
+      if (["countries", "universities", "programmes"].includes(type)) {
+        const { data } = await supabase.from("document_types").select("id, name, category").order("category").order("name");
+        requirementDocumentTypes = data || [];
+        fieldHtml.push(`<div class="field full"><label>Required document types</label><div class="requirements-doc-grid">${requirementDocumentTypes.map((item) => `<label class="check-row"><input type="checkbox" data-required-document="${item.id}" /> <span>${esc(item.name)}</span></label>`).join("")}</div><small style="color:var(--ink-soft);">These requirements are merged with the other selected entities when a compliance check runs.</small></div>`);
+        fieldHtml.push(`<div class="field"><label for="requirement-min-ielts">Minimum IELTS overall score</label><input id="requirement-min-ielts" type="number" min="0" max="9" step="0.5" placeholder="Optional" /></div>`);
+        fieldHtml.push(`<div class="field"><label for="requirement-passport-months">Minimum passport validity (months)</label><input id="requirement-passport-months" type="number" min="0" step="1" placeholder="Optional" /></div>`);
+        fieldHtml.push(`<div class="field"><label for="requirement-min-gpa">Minimum GPA</label><input id="requirement-min-gpa" type="number" min="0" step="0.01" placeholder="Optional" /></div>`);
       }
       $("dynamic-fields").innerHTML = fieldHtml.join("");
     }
@@ -125,6 +134,11 @@
         if (!element) continue;
         element.value = field.key === "requirements_notes" ? notesFor(record || {}) : (record?.[field.key] || "");
       }
+      const requirementSet = record?.requirements || {};
+      document.querySelectorAll("[data-required-document]").forEach((checkbox) => { checkbox.checked = (requirementSet.requiredDocumentTypes || []).includes(checkbox.dataset.requiredDocument); });
+      if ($("requirement-min-ielts")) $("requirement-min-ielts").value = requirementSet.minIeltsScore ?? "";
+      if ($("requirement-passport-months")) $("requirement-passport-months").value = requirementSet.minPassportValidityMonths ?? "";
+      if ($("requirement-min-gpa")) $("requirement-min-gpa").value = requirementSet.minGpa ?? "";
     }
 
     function closeForm() { editingId = null; formPanel.hidden = true; $("record-form").reset(); }
@@ -150,7 +164,11 @@
       const payload = {};
       for (const field of config.fields) { const value = $(`field-${field.key}`).value.trim(); if (field.required && !value) { showNotice("error", `${field.label} is required.`); return; } if (field.key !== "requirements_notes") payload[field.key] = value || null; }
       const notes = $("field-requirements_notes")?.value.trim() || "";
-      if (["countries", "universities", "programmes"].includes(type)) payload.requirements = { ...(editingId ? (records.find((record) => record.id === editingId)?.requirements || {}) : {}), notes };
+      if (["countries", "universities", "programmes"].includes(type)) {
+        const requiredDocumentTypes = [...document.querySelectorAll("[data-required-document]:checked")].map((checkbox) => checkbox.dataset.requiredDocument);
+        const numberOrNull = (id) => { const value = $(id)?.value.trim(); return value === "" ? null : Number(value); };
+        payload.requirements = { requiredDocumentTypes, minIeltsScore: numberOrNull("requirement-min-ielts"), minPassportValidityMonths: numberOrNull("requirement-passport-months"), minGpa: numberOrNull("requirement-min-gpa"), notes };
+      }
       if (!editingId) payload.owner_id = userId;
       const query = editingId ? supabase.from(config.table).update(payload).eq("id", editingId) : supabase.from(config.table).insert(payload);
       const { error } = await query;

@@ -80,6 +80,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--verdigris);
 .field { margin-bottom: 12px; }
 .field-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .field-row > .field { flex: 1; min-width: 160px; }
+.requirements-doc-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 6px 12px; max-height: 260px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); }
+.requirements-doc-grid .check-row { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 0.78rem; }
+.requirements-doc-grid input { width: auto; margin-top: 3px; }
+@media (max-width: 720px) { .requirements-doc-grid { grid-template-columns: 1fr 1fr; } }
 
 button, .btn {
   font-family: var(--font-body); font-weight: 500; font-size: 0.88rem; cursor: pointer;

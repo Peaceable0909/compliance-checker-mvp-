@@ -79,7 +79,8 @@ function nameSimilarity(nameA, nameB) {
 }
 
 function fieldValue(documents, type, field) {
-  const doc = documents.find((d) => d.selectedType.toLowerCase() === type.toLowerCase());
+  const needle = type.toLowerCase();
+  const doc = documents.find((d) => d.selectedType.toLowerCase().includes(needle));
   return doc?.extraction?.[field];
 }
 
@@ -102,8 +103,10 @@ function configuredRuleSeverity(rule) {
 }
 
 function numeric(value) {
-  if (typeof value === "number") return value;
-  const parsed = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const parsed = Number(raw.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -137,6 +140,26 @@ function evaluateAdvancedRules(findings, input, rule) {
   if (field === "english_pte_minimum") return evaluateThresholdRule(findings, input, rule, "pteTotal", "PTE score", { mode: "minimum" });
   if (field === "financial_minimum_balance") return evaluateThresholdRule(findings, input, rule, "accountBalance", "Financial balance", { mode: "minimum" });
   if (field === "financial_maintenance_period") return evaluateThresholdRule(findings, input, rule, "maintenancePeriodDays", "Financial maintenance period", { mode: "minimum" });
+}
+
+function evaluateMergedRequirements(findings, input) {
+  const requirements = input.requirements || {};
+  const docsByType = (needle) => input.documents.filter((doc) => doc.selectedType.toLowerCase().includes(needle));
+  const threshold = (key, label, extractionField, documentNeedle) => {
+    const expected = numeric(requirements[key]);
+    if (expected === null) return;
+    const docs = docsByType(documentNeedle);
+    const values = docs.map((doc) => ({ doc, value: numeric(doc.extraction?.[extractionField]) })).filter((item) => item.value !== null);
+    if (!values.length) {
+      addFinding(findings, input, `${key}_missing`, "critical", `The application requires ${label}, but no usable ${label} result was extracted.`, { expected, field: extractionField }, { expectedValue: String(expected), recommendation: `Upload a valid ${label} document and allow automatic extraction to complete.` });
+      return;
+    }
+    if (!values.some(({ value }) => value >= expected)) {
+      addFinding(findings, input, `${key}_below_minimum`, "critical", `The extracted ${label} does not meet the minimum requirement of ${expected}.`, { expected, actual: values[0].value, field: extractionField }, { documentId: values[0].doc.id, expectedValue: String(expected), actualValue: String(values[0].value), recommendation: `Confirm the ${label} requirement and provide stronger evidence if needed.` });
+    }
+  };
+  threshold("minIeltsScore", "IELTS overall score", "ieltsOverall", "ielts");
+  threshold("minGpa", "GPA", "gpa", "transcript");
 }
 
 function evaluateConfiguredRules(findings, input) {
@@ -211,7 +234,7 @@ export function evaluateCompliance(input) {
       );
     }
     if (
-      document.selectedType.toLowerCase() === "passport" &&
+      document.selectedType.toLowerCase().includes("passport") &&
       extraction.expiryDate &&
       input.requirements?.requiredPassportExpiry &&
       extraction.expiryDate < input.requirements.requiredPassportExpiry
@@ -239,8 +262,8 @@ export function evaluateCompliance(input) {
           : "The passport and transcript names appear to refer to the same person but have a minor variation.",
         { passportName, transcriptName, similarity: Math.round(similarity * 100) / 100 },
         {
-          documentId: input.documents.find((d) => d.selectedType.toLowerCase() === "passport")?.id,
-          relatedDocumentId: input.documents.find((d) => d.selectedType.toLowerCase() === "transcript")?.id,
+          documentId: input.documents.find((d) => d.selectedType.toLowerCase().includes("passport"))?.id,
+          relatedDocumentId: input.documents.find((d) => d.selectedType.toLowerCase().includes("transcript"))?.id,
           expectedValue: passportName, actualValue: transcriptName,
           confidence: Math.round(similarity * 100) / 100,
           recommendation: critical
@@ -257,7 +280,7 @@ export function evaluateCompliance(input) {
       "The passport date of birth does not match the application.",
       { passportDateOfBirth: passportDob, applicationDateOfBirth: input.application.dateOfBirth },
       {
-        documentId: input.documents.find((d) => d.selectedType.toLowerCase() === "passport")?.id,
+        documentId: input.documents.find((d) => d.selectedType.toLowerCase().includes("passport"))?.id,
         expectedValue: input.application.dateOfBirth, actualValue: passportDob,
         recommendation: "Resolve the identity discrepancy before continuing.",
       }
@@ -270,7 +293,7 @@ export function evaluateCompliance(input) {
       "The passport number does not match the application.",
       { documentPassportNumber: passportNumber, applicationPassportNumber: input.application.passportNumber },
       {
-        documentId: input.documents.find((d) => d.selectedType.toLowerCase() === "passport")?.id,
+        documentId: input.documents.find((d) => d.selectedType.toLowerCase().includes("passport"))?.id,
         expectedValue: input.application.passportNumber, actualValue: passportNumber,
         recommendation: "Confirm the correct passport number and update the application.",
       }
@@ -288,14 +311,15 @@ export function evaluateCompliance(input) {
       );
     }
   }
-  if (input.requirements?.universityRequiresIelts && !presentTypes.has("ielts")) {
+  if (input.requirements?.universityRequiresIelts && ![...presentTypes].some((type) => type.includes("ielts"))) {
     addFinding(
       findings, input, "missing_ielts", "critical",
-      "The selected university requires IELTS evidence, but no IELTS document is present.",
+      "The selected institution or programme requires IELTS evidence, but no IELTS document is present.",
       { universityRequiresIelts: true },
       { expectedValue: "IELTS", recommendation: "Upload the required IELTS certificate." }
     );
   }
+  evaluateMergedRequirements(findings, input);
 
   const priorField = fieldValue(input.documents, "transcript", "fieldOfStudy") || fieldValue(input.documents, "cv", "fieldOfStudy");
   const targetProgramme = input.application?.programmeName;

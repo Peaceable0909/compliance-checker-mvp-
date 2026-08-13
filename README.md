@@ -68,13 +68,10 @@ Every provider is selected through a `get*Provider()` function, never
 imported directly by a page — so replacing Supabase, Gemini, Qwen, or the
 Apps Script archive later means writing one new file, not touching the UI.
 
-## Known gaps vs. the full spec (left for a follow-up pass)
+## Current implementation notes
 
-- `compliance_requirements` (per-programme required-document rules) isn't
-  wired into the UI yet — `requiredDocumentTypes` currently comes from each
-  document type's `required_by_default` flag only.
-- Gemini/Qwen extraction and finding providers are interface stubs that
-  throw a clear "not configured" error until keys are added — by design,
-  per the cost-control requirement not to call paid services automatically.
-- No retry/backoff queue UI yet for provider rate limits (relevant once a
-  real AI provider is turned on).
+- Countries, universities, and programmes store structured requirement sets in their existing `requirements` JSONB fields. The reference-data workspace exposes required document types, minimum IELTS score, minimum GPA, minimum passport validity, and reviewer notes without requiring a new table.
+- Application compliance merges entity requirements deterministically: document types are unioned across country, university, and programme; numeric thresholds use the most specific non-empty value, with programme taking precedence over university and country.
+- The existing `compliance_requirements` table remains the versioned rule catalog for granular document, financial, English, GPA, expiry, and human-review rules. The entity requirement settings complement that catalog rather than replacing it.
+- Gemini/Qwen extraction and finding providers remain replaceable provider interfaces. Gemini OCR is invoked through the authenticated Supabase Edge Function when configured.
+- No retry/backoff queue UI yet for provider rate limits; failed documents can be retried directly from the application workspace.
