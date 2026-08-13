@@ -195,6 +195,9 @@
       container.querySelectorAll("[data-action='retry']").forEach((button) => {
         button.addEventListener("click", () => processDocument(button.dataset.docId));
       });
+      container.querySelectorAll("[data-action='delete-document']").forEach((button) => {
+        button.addEventListener("click", () => deleteDocument(button.dataset.docId));
+      });
       for (const t of types) {
         const input = container.querySelector(`input[type=file][data-type-id="${t.id}"]`);
         if (input) input.addEventListener("change", (e) => uploadFiles(t, e.target.files));
@@ -228,6 +231,7 @@
               ${ex ? '<span class="badge accepted">processed</span>' : d.processing_status === "failed" ? '<span class="badge critical">failed</span>' : '<span class="badge warning">processing automatically</span>'}
               <button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="preview" data-doc-id="${d.id}">Preview</button>
               ${d.processing_status === "failed" ? `<button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="retry" data-doc-id="${d.id}">Retry</button>` : ""}
+              <button class="secondary" style="padding:4px 10px; font-size:0.78rem; color:var(--critical, #a33);" data-action="delete-document" data-doc-id="${d.id}">Delete</button>
             </div>
           </div>
           <div id="extraction-slot-${d.id}"></div>
@@ -353,6 +357,28 @@
       if (!match) return;
       forcedVisible.add(match.id);
       renderDoctypeBlocks();
+    }
+
+    async function deleteDocument(docId) {
+      const document = documents.find((item) => item.id === docId);
+      if (!document) return;
+      if (!window.confirm(`Delete ${document.file_name}? This removes the uploaded file and its automatic extraction.`)) return;
+      const { count: runCount, error: runError } = await supabase.from("compliance_runs").select("id", { count: "exact", head: true }).eq("application_id", applicationId);
+      if (runError) { showNotice("error", runError.message); return; }
+      if ((runCount || 0) > 0) { showNotice("error", "This document cannot be deleted because the application already has a compliance history. Create a new application or preserve the audit trail."); return; }
+      try {
+        if (document.storage_path) await getStorageProvider().remove(document.storage_path);
+        const { error: extractionError } = await supabase.from("document_extractions").delete().eq("document_id", docId);
+        if (extractionError) throw extractionError;
+        const { error: documentError } = await supabase.from("documents").delete().eq("id", docId).eq("owner_id", userId);
+        if (documentError) throw documentError;
+        documents = documents.filter((item) => item.id !== docId);
+        delete extractionsByDoc[docId];
+        renderDoctypeBlocks();
+        showNotice("ok", `${document.file_name} deleted.`);
+      } catch (error) {
+        showNotice("error", `Could not delete ${document.file_name}: ${error.message || "delete failed."}`);
+      }
     }
 
     function dedupeFindings(findings) {

@@ -111,8 +111,9 @@
       const visible = records.filter((record) => `${labelFor(record)} ${metaFor(record)}`.toLowerCase().includes(needle));
       const target = $("record-list");
       if (!visible.length) { target.innerHTML = `<div class="empty-state">No ${config.title.toLowerCase()} found. Create the first record above.</div>`; return; }
-      target.innerHTML = visible.map((record) => `<div class="dashboard-list-item"><div><div class="title">${esc(labelFor(record))}</div><div class="meta">${esc(metaFor(record))}</div></div><div class="right"><button class="secondary" data-edit="${record.id}">Edit</button></div></div>`).join("");
+      target.innerHTML = visible.map((record) => `<div class="dashboard-list-item"><div><div class="title">${esc(labelFor(record))}</div><div class="meta">${esc(metaFor(record))}</div></div><div class="right"><button class="secondary" data-edit="${record.id}">Edit</button>${config.table === "students" ? `<button class="secondary" style="color:var(--critical, #a33);" data-delete="${record.id}">Delete</button>` : ""}</div></div>`).join("");
       target.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(records.find((record) => record.id === button.dataset.edit))));
+      target.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => deleteRecord(button.dataset.delete)));
     }
 
     function openForm(record = null) {
@@ -127,6 +128,22 @@
     }
 
     function closeForm() { editingId = null; formPanel.hidden = true; $("record-form").reset(); }
+
+    async function deleteRecord(recordId) {
+      const record = records.find((item) => item.id === recordId);
+      if (!record || config.table !== "students") return;
+      if (!window.confirm(`Delete ${record.full_name}? Students with applications or uploaded documents cannot be deleted.`)) return;
+      const [{ count: applicationCount, error: applicationError }, { count: documentCount, error: documentError }] = await Promise.all([
+        supabase.from("applications").select("id", { count: "exact", head: true }).eq("student_id", recordId),
+        supabase.from("documents").select("id", { count: "exact", head: true }).eq("student_id", recordId),
+      ]);
+      if (applicationError || documentError) { showNotice("error", (applicationError || documentError).message); return; }
+      if ((applicationCount || 0) > 0 || (documentCount || 0) > 0) { showNotice("error", "This student cannot be deleted because applications or uploaded documents depend on the record."); return; }
+      const { error } = await supabase.from("students").delete().eq("id", recordId).eq("owner_id", userId);
+      if (error) { showNotice("error", error.message); return; }
+      showNotice("ok", `${record.full_name} deleted.`);
+      await loadRecords();
+    }
 
     async function saveRecord(event) {
       event.preventDefault();

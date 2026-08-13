@@ -74,6 +74,7 @@
       document.getElementById("custom-list").innerHTML = custom.length
         ? groupedHtml(custom)
         : `<div class="empty-state">No custom document types yet.</div>`;
+      document.querySelectorAll("[data-delete-type]").forEach((button) => button.addEventListener("click", () => deleteType(button.dataset.deleteType)));
     }
 
     function groupedHtml(types) {
@@ -85,8 +86,24 @@
     function rowHtml(t) {
       return `<div class="list-row">
         <div><div class="title">${t.name}${t.required_by_default ? ' <span class="badge critical">required</span>' : ""}</div><div class="meta">${t.description ?? ""}</div></div>
-        <a class="btn secondary" href="compliance-rules.html?scope=document_type&target_id=${t.id}">What to look for</a>
+        <div style="display:flex; gap:8px; align-items:center;">${!t.is_system ? `<button class="secondary" style="color:var(--critical, #a33);" data-delete-type="${t.id}">Delete</button>` : ""}<a class="btn secondary" href="compliance-rules.html?scope=document_type&target_id=${t.id}">What to look for</a></div>
       </div>`;
+    }
+
+    async function deleteType(typeId) {
+      const { data: type, error: typeError } = await supabase.from("document_types").select("id, name, is_system").eq("id", typeId).eq("is_system", false).eq("owner_id", userId).single();
+      if (typeError || !type) { showNotice("error", typeError?.message || "Custom document type not found."); return; }
+      if (!window.confirm(`Delete custom document type ${type.name}? It must not be used by documents or compliance rules.`)) return;
+      const [{ count: documentCount, error: documentError }, { count: ruleCount, error: ruleError }] = await Promise.all([
+        supabase.from("documents").select("id", { count: "exact", head: true }).eq("document_type_id", typeId),
+        supabase.from("compliance_requirements").select("id", { count: "exact", head: true }).eq("document_type_id", typeId),
+      ]);
+      if (documentError || ruleError) { showNotice("error", (documentError || ruleError).message); return; }
+      if ((documentCount || 0) > 0 || (ruleCount || 0) > 0) { showNotice("error", "This document type cannot be deleted because documents or compliance rules depend on it."); return; }
+      const { error } = await supabase.from("document_types").delete().eq("id", typeId).eq("owner_id", userId).eq("is_system", false);
+      if (error) { showNotice("error", error.message); return; }
+      showNotice("ok", `${type.name} deleted.`);
+      await loadTypes();
     }
 
     async function addType() {
