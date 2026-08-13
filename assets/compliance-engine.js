@@ -43,6 +43,41 @@ function same(left, right) {
   return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
 }
 
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let previous = Array.from({ length: n + 1 }, (_, index) => index);
+  for (let rowIndex = 1; rowIndex <= m; rowIndex++) {
+    const row = [rowIndex];
+    for (let columnIndex = 1; columnIndex <= n; columnIndex++) {
+      row[columnIndex] = a[rowIndex - 1] === b[columnIndex - 1]
+        ? previous[columnIndex - 1]
+        : 1 + Math.min(previous[columnIndex - 1], previous[columnIndex], row[columnIndex - 1]);
+    }
+    previous = row;
+  }
+  return previous[n];
+}
+
+function nameSimilarity(nameA, nameB) {
+  const tokensA = String(nameA).toUpperCase().replace(/[^A-Z\s]/g, " ").split(/\s+/).filter(Boolean);
+  const tokensB = String(nameB).toUpperCase().replace(/[^A-Z\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (!tokensA.length || !tokensB.length) return 0;
+  const used = new Set();
+  let matched = 0;
+  for (const tokenA of tokensA) {
+    const index = tokensB.findIndex((tokenB, indexB) => {
+      if (used.has(indexB)) return false;
+      if (tokenA === tokenB) return true;
+      if (tokenA.length <= 2 || tokenB.length <= 2) return false;
+      return levenshtein(tokenA, tokenB) <= Math.max(1, Math.floor(Math.min(tokenA.length, tokenB.length) * 0.2));
+    });
+    if (index !== -1) { used.add(index); matched += 1; }
+  }
+  return matched / Math.max(tokensA.length, tokensB.length);
+}
+
 function fieldValue(documents, type, field) {
   const doc = documents.find((d) => d.selectedType.toLowerCase() === type.toLowerCase());
   return doc?.extraction?.[field];
@@ -193,18 +228,27 @@ export function evaluateCompliance(input) {
   // Stage 2: identity + application facts across documents.
   const passportName = fieldValue(input.documents, "passport", "fullName");
   const transcriptName = fieldValue(input.documents, "transcript", "fullName");
-  if (passportName && transcriptName && !same(passportName, transcriptName)) {
-    addFinding(
-      findings, input, "name_mismatch", "warning",
-      "The passport name does not match the academic transcript name.",
-      { passportName, transcriptName },
-      {
-        documentId: input.documents.find((d) => d.selectedType.toLowerCase() === "passport")?.id,
-        relatedDocumentId: input.documents.find((d) => d.selectedType.toLowerCase() === "transcript")?.id,
-        expectedValue: passportName, actualValue: transcriptName,
-        recommendation: "Verify the name variation against official supporting evidence.",
-      }
-    );
+  if (passportName && transcriptName) {
+    const similarity = nameSimilarity(passportName, transcriptName);
+    if (similarity < 1) {
+      const critical = similarity < 0.6;
+      addFinding(
+        findings, input, "name_mismatch", critical ? "critical" : "warning",
+        critical
+          ? "The passport name does not match the academic transcript name."
+          : "The passport and transcript names appear to refer to the same person but have a minor variation.",
+        { passportName, transcriptName, similarity: Math.round(similarity * 100) / 100 },
+        {
+          documentId: input.documents.find((d) => d.selectedType.toLowerCase() === "passport")?.id,
+          relatedDocumentId: input.documents.find((d) => d.selectedType.toLowerCase() === "transcript")?.id,
+          expectedValue: passportName, actualValue: transcriptName,
+          confidence: Math.round(similarity * 100) / 100,
+          recommendation: critical
+            ? "Verify the name variation against official supporting evidence."
+            : "Likely the same person with reordered or lightly misspelled name — confirm and proceed.",
+        }
+      );
+    }
   }
   const passportDob = fieldValue(input.documents, "passport", "dateOfBirth");
   if (passportDob && input.application.dateOfBirth && passportDob !== input.application.dateOfBirth) {
