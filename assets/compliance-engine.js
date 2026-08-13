@@ -149,6 +149,7 @@ function evaluateMergedRequirements(findings, input) {
     const expected = numeric(requirements[key]);
     if (expected === null) return;
     const docs = docsByType(documentNeedle);
+    if (!docs.length && ["minIeltsScore", "minEnglishComponentScore"].includes(key) && (requirements.englishEvidenceAlternatives || []).some((type) => input.documents.some((doc) => doc.selectedType.toLowerCase().includes(String(type).toLowerCase())))) return;
     const values = docs.map((doc) => ({ doc, value: numeric(doc.extraction?.[extractionField]) })).filter((item) => item.value !== null);
     if (!values.length) {
       addFinding(findings, input, `${key}_missing`, "critical", `The application requires ${label}, but no usable ${label} result was extracted.`, { expected, field: extractionField }, { expectedValue: String(expected), recommendation: `Upload a valid ${label} document and allow automatic extraction to complete.` });
@@ -159,6 +160,7 @@ function evaluateMergedRequirements(findings, input) {
     }
   };
   threshold("minIeltsScore", "IELTS overall score", "ieltsOverall", "ielts");
+  threshold("minEnglishComponentScore", "minimum English component score", "ieltsLowestBand", "ielts");
   threshold("minGpa", "GPA", "gpa", "transcript");
 }
 
@@ -301,6 +303,12 @@ export function evaluateCompliance(input) {
   }
 
   // Stage 3: application against configured country/university/programme requirements.
+  for (const alternativeGroup of (input.requirements?.requiredDocumentAlternatives || [])) {
+    const hasAlternative = alternativeGroup.some((requiredType) => [...presentTypes].some((presentType) => presentType.includes(requiredType.toLowerCase())));
+    if (!hasAlternative) {
+      addFinding(findings, input, "missing_required_alternative_document", "critical", `At least one of the following required documents is missing: ${alternativeGroup.join(" or ")}.`, { alternativeGroup }, { expectedValue: alternativeGroup.join(" or "), recommendation: `Upload one accepted document: ${alternativeGroup.join(" or ")}.` });
+    }
+  }
   for (const requiredType of input.requiredDocumentTypes) {
     if (!presentTypes.has(requiredType.toLowerCase())) {
       addFinding(

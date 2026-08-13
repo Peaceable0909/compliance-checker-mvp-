@@ -422,14 +422,19 @@
       const programme = application?.programmes?.requirements || {};
       const ordered = [country, university, programme];
       const requiredIds = new Set(ordered.flatMap((set) => Array.isArray(set.requiredDocumentTypes) ? set.requiredDocumentTypes : []));
-      const requiredTypes = documentTypes.filter((type) => type.required_by_default || requiredIds.has(type.id)).map((type) => type.name);
+      const alternativeIds = ordered.flatMap((set) => Array.isArray(set.requiredDocumentAlternatives) ? set.requiredDocumentAlternatives : []);
+      const alternativeIdSet = new Set(alternativeIds.flat());
+      const requiredTypes = documentTypes.filter((type) => (type.required_by_default || requiredIds.has(type.id)) && !alternativeIdSet.has(type.id)).map((type) => type.name);
+      const requiredDocumentAlternatives = alternativeIds.map((group) => documentTypes.filter((type) => group.includes(type.id)).map((type) => type.name)).filter((group) => group.length > 1);
+      const englishIds = ordered.flatMap((set) => Array.isArray(set.englishEvidenceAlternatives) ? set.englishEvidenceAlternatives : []);
+      const englishEvidenceAlternatives = [...new Set(englishIds)].map((id) => documentTypes.find((type) => type.id === id)?.name).filter(Boolean);
       const mostSpecific = (key) => {
         for (const set of [programme, university, country]) if (set[key] !== null && set[key] !== undefined && set[key] !== "") return Number(set[key]);
         return null;
       };
       const minPassportValidityMonths = mostSpecific("minPassportValidityMonths");
       const requiredPassportExpiry = minPassportValidityMonths === null ? null : new Date(Date.now() + minPassportValidityMonths * 30.4375 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      return { requiredDocumentTypes: requiredTypes, minIeltsScore: mostSpecific("minIeltsScore"), minGpa: mostSpecific("minGpa"), minPassportValidityMonths, requiredPassportExpiry, universityRequiresIelts: mostSpecific("minIeltsScore") !== null };
+      return { requiredDocumentTypes: requiredTypes, requiredDocumentAlternatives, englishEvidenceAlternatives, minIeltsScore: mostSpecific("minIeltsScore"), minEnglishComponentScore: mostSpecific("minEnglishComponentScore"), minGpa: mostSpecific("minGpa"), minPassportValidityMonths, requiredPassportExpiry, universityRequiresIelts: [programme, university, country].some((set) => set.universityRequiresIelts === true) };
     }
 
     function buildEngineInput() {
