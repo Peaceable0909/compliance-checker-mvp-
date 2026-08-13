@@ -271,3 +271,15 @@ tr:hover td { background: rgba(22, 35, 59, 0.02); }
 .technical-details { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
 .technical-details summary { cursor:pointer; color:var(--ink-soft); font-size:0.84rem; }
 @media (max-width:700px) { .report-score-card { align-items:flex-start; flex-direction:column; } .report-counts { justify-content:flex-start; } .report-score { font-size:3rem; } }
+
+/* ---- Application loading states ---- */
+.page-loading { position:fixed; inset:0; z-index:100; display:grid; place-items:center; padding:24px; background:rgba(246,244,238,.94); backdrop-filter:blur(3px); }
+.page-loading[hidden] { display:none; }
+.page-loading-card, .loading-panel { display:flex; align-items:center; gap:14px; padding:18px 20px; border:1px solid var(--line); border-radius:12px; background:var(--paper-raised); box-shadow:var(--shadow); }
+.page-loading-card { width:min(420px, 100%); }
+.page-loading-card p, .loading-panel p { margin:3px 0 0; color:var(--ink-soft); font-size:.82rem; }
+.loading-panel { justify-content:center; margin:8px 0; min-height:112px; color:var(--ink-soft); }
+.loading-spinner, .button-spinner { display:inline-block; flex:0 0 auto; width:24px; height:24px; border:3px solid var(--line); border-top-color:var(--verdigris); border-radius:50%; animation:compliance-spin .8s linear infinite; }
+.button-spinner { width:14px; height:14px; border-width:2px; margin-right:7px; vertical-align:-2px; }
+@keyframes compliance-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loading-spinner, .button-spinner { animation:none; } }

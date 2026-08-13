@@ -7,6 +7,9 @@
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
+  <div id="page-loading" class="page-loading" role="status" aria-live="polite">
+    <div class="page-loading-card"><div class="loading-spinner" aria-hidden="true"></div><div><strong id="page-loading-title">Loading application</strong><p id="page-loading-detail">Preparing your compliance workspace…</p></div></div>
+  </div>
   <div class="shell">
     <a href="applications.html" style="font-size:0.82rem; color:var(--ink-soft); text-decoration:none;">&larr; All applications</a>
 
@@ -65,7 +68,16 @@
     if (!applicationId) window.location.href = "applications.html";
 
     const noticeSlot = document.getElementById("notice-slot");
+    const pageLoading = document.getElementById("page-loading");
     function showNotice(kind, msg) { noticeSlot.innerHTML = `<div class="notice ${kind}">${msg}</div>`; }
+    function setPageLoading(visible, title = "Loading application", detail = "Preparing your compliance workspace…") {
+      pageLoading.hidden = !visible;
+      document.getElementById("page-loading-title").textContent = title;
+      document.getElementById("page-loading-detail").textContent = detail;
+    }
+    function setDocumentsLoading(message = "Loading uploaded documents…") {
+      document.getElementById("doctype-blocks").innerHTML = `<div class="loading-panel"><div class="loading-spinner" aria-hidden="true"></div><div><strong>${escapeHtml(message)}</strong><p>We are retrieving document status and automatic extraction results.</p></div></div>`;
+    }
     function escapeHtml(value) { return String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" }[c])); }
     function slug(name) { return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
     function stampClass(status) { return status === "green" ? "green" : status === "yellow" ? "yellow" : status === "red" ? "red" : "grey"; }
@@ -85,7 +97,8 @@
     if (session) {
       wireTopbar(session.user.email);
       userId = session.user.id;
-      await loadAll();
+      setPageLoading(true, "Loading application", "Fetching application details and compliance requirements…");
+      try { await loadAll(); } finally { setPageLoading(false); }
       document.getElementById("run-check-btn").addEventListener("click", runComplianceCheck);
       document.getElementById("upload-type-select").addEventListener("change", (event) => {
         const typeId = event.target.value;
@@ -128,6 +141,7 @@
 
     async function loadDocuments() {
       const container = document.getElementById("doctype-blocks");
+      setDocumentsLoading();
       try {
         const { data: docs, error } = await withTimeout(
           supabase.from("documents").select("*").eq("application_id", applicationId).order("uploaded_at", { ascending: false }),
@@ -138,6 +152,7 @@
         documents = docs || [];
 
         if (documents.length) {
+          setDocumentsLoading("Loading automatic extraction results…");
           const { data: extractions, error: extractionError } = await withTimeout(
             supabase.from("document_extractions").select("*").in("document_id", documents.map((d) => d.id)).order("created_at", { ascending: false }),
             LOAD_TIMEOUT_MS,
@@ -263,7 +278,8 @@
       if (!document || processingDocuments.has(docId)) return;
       processingDocuments.add(docId);
       try {
-        document.processing_status = "queued";
+        document.processing_status = "processing";
+        renderDoctypeBlocks();
         showNotice("queue", `Processing ${document.file_name} automatically…`);
         const type = documentTypes.find((item) => item.id === document.document_type_id);
         let file = uploadedFile;
@@ -423,6 +439,10 @@
     }
 
     async function runComplianceCheck() {
+      const runButton = document.getElementById("run-check-btn");
+      if (runButton.disabled) return;
+      runButton.disabled = true;
+      runButton.innerHTML = `<span class="button-spinner" aria-hidden="true"></span> Running compliance check…`;
       try {
         showNotice("queue", "Running compliance check…");
         const input = buildEngineInput();
@@ -470,6 +490,9 @@
         showNotice("ok", `Compliance check complete — ${result.findings.length} finding(s).`);
       } catch (err) {
         showNotice("error", err.message || "Compliance check failed.");
+      } finally {
+        runButton.disabled = false;
+        runButton.textContent = "Run compliance check";
       }
     }
 
