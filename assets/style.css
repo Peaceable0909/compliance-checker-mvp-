@@ -369,15 +369,15 @@ body.workspace-mode { background:#f4f7fb; color:#172033; }
 /* ---- Animated compliance status visuals ---- */
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .status-score-wrap { position:relative; min-width:145px; }
-.status-orb { position:absolute; top:4px; right:2px; width:17px; height:17px; border-radius:50%; animation:status-breathe 2.4s ease-in-out infinite; }
+.status-orb { position:absolute; top:4px; right:2px; width:17px; height:17px; border-radius:50%; animation:status-pulse 3.2s cubic-bezier(.45,0,.55,1) infinite; }
 .status-orb-green, .status-chip-green .status-chip-dot { background:#18b66a; box-shadow:0 0 0 5px rgba(24,182,106,.13), 0 0 18px rgba(24,182,106,.65); }
 .status-orb-yellow, .status-chip-yellow .status-chip-dot { background:#f5aa19; box-shadow:0 0 0 5px rgba(245,170,25,.15), 0 0 18px rgba(245,170,25,.68); }
 .status-orb-red, .status-chip-red .status-chip-dot { background:#ec4b4b; box-shadow:0 0 0 5px rgba(236,75,75,.14), 0 0 18px rgba(236,75,75,.65); }
 .status-orb-grey, .status-chip-grey .status-chip-dot { background:#94a0b2; box-shadow:0 0 0 5px rgba(148,160,178,.13); }
 .status-chip { display:inline-grid; place-items:center; width:29px; height:22px; border-radius:999px; background:transparent; }
-.status-chip-dot { display:block; width:10px; height:10px; border-radius:50%; animation:status-breathe 2.4s ease-in-out infinite; }
+.status-chip-dot { display:block; width:10px; height:10px; border-radius:50%; animation:status-pulse 3.2s cubic-bezier(.45,0,.55,1) infinite; }
 .report-score.green { text-shadow:0 0 18px rgba(24,182,106,.18); }
 .report-score.yellow { text-shadow:0 0 18px rgba(245,170,25,.2); }
 .report-score.red { text-shadow:0 0 18px rgba(236,75,75,.2); }
-@keyframes status-breathe { 0%,100% { transform:scale(.9); opacity:.82; } 50% { transform:scale(1.12); opacity:1; } }
+@keyframes status-pulse { 0%,100% { transform:scale(.92); opacity:.82; filter:saturate(.92); } 50% { transform:scale(1.08); opacity:1; filter:saturate(1.12); } }
 @media (prefers-reduced-motion: reduce) { .status-orb, .status-chip-dot { animation:none; } }
