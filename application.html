@@ -192,6 +192,9 @@
       container.querySelectorAll("[data-action='preview']").forEach((button) => {
         button.addEventListener("click", () => previewDocument(button.dataset.docId));
       });
+      container.querySelectorAll("[data-action='retry']").forEach((button) => {
+        button.addEventListener("click", () => processDocument(button.dataset.docId));
+      });
       for (const t of types) {
         const input = container.querySelector(`input[type=file][data-type-id="${t.id}"]`);
         if (input) input.addEventListener("change", (e) => uploadFiles(t, e.target.files));
@@ -222,8 +225,9 @@
             <span>${d.file_name} <span style="color:var(--ink-soft); font-size:0.78rem;">(${Math.round(d.file_size / 1024)} KB)</span></span>
             <div style="display:flex; align-items:center; gap:8px;">
               ${statusBadge}
-              ${ex ? '<span class="badge accepted">processed</span>' : '<span class="badge warning">processing automatically</span>'}
+              ${ex ? '<span class="badge accepted">processed</span>' : d.processing_status === "failed" ? '<span class="badge critical">failed</span>' : '<span class="badge warning">processing automatically</span>'}
               <button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="preview" data-doc-id="${d.id}">Preview</button>
+              ${d.processing_status === "failed" ? `<button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="retry" data-doc-id="${d.id}">Retry</button>` : ""}
             </div>
           </div>
           <div id="extraction-slot-${d.id}"></div>
@@ -254,6 +258,7 @@
       if (!document || processingDocuments.has(docId)) return;
       processingDocuments.add(docId);
       try {
+        document.processing_status = "queued";
         showNotice("queue", `Processing ${document.file_name} automatically…`);
         const type = documentTypes.find((item) => item.id === document.document_type_id);
         let file = uploadedFile;
@@ -272,7 +277,14 @@
             OCR_TIMEOUT_MS,
             "Gemini OCR"
           );
-          if (response.error) throw response.error;
+          if (response.error) {
+            let detail = response.error.message || "OCR Edge Function failed.";
+            try {
+              const body = await response.error.context?.json();
+              detail = body?.details || body?.error || detail;
+            } catch { /* keep the SDK error when the response body is unavailable */ }
+            throw new Error(detail);
+          }
           result = response.data;
         } else {
           const docAI = getDocumentAIProvider();
@@ -292,6 +304,7 @@
         await loadDocuments();
       } catch (err) {
         document.processing_status = "failed";
+        await supabase.from("documents").update({ processing_status: "failed" }).eq("id", docId);
         renderDoctypeBlocks();
         showNotice("error", `${document.file_name}: ${err.message || "Automatic processing failed."}`);
       } finally {
@@ -342,6 +355,16 @@
       renderDoctypeBlocks();
     }
 
+    function dedupeFindings(findings) {
+      const seen = new Set();
+      return findings.filter((finding) => {
+        const key = [finding.findingType, finding.documentId || "", finding.relatedDocumentId || "", finding.description || ""].join("|");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
     async function runComplianceCheck() {
       try {
         showNotice("queue", "Running compliance check…");
@@ -375,7 +398,9 @@
         };
 
         const provider = getComplianceProvider();
-        const result = await provider.evaluate(input);
+        const rawResult = await provider.evaluate(input);
+        const uniqueFindings = dedupeFindings(rawResult.findings || []);
+        const result = { ...rawResult, findings: uniqueFindings };
 
         const { data: run, error: runErr } = await supabase.from("compliance_runs").insert({
           application_id: applicationId, started_by: userId, provider: provider.name,

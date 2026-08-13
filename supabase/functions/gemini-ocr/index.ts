@@ -93,15 +93,31 @@ Deno.serve(async (request: Request) => {
   const documentType = payload.document_type || document.detected_document_type || "the selected document type";
 
   const prompt = `You are extracting compliance evidence from a ${documentType}. Return only JSON matching the schema. Do not guess. Use empty or omitted fields when the value is not clearly visible. Normalize dates to YYYY-MM-DD where possible. Extract GPA, degree classification, IELTS overall and lowest band, TOEFL total, PTE total, bank balance, currency, statement date, and financial maintenance period when present. Set extractionStatus to complete only when the page is readable and the relevant evidence is clear; otherwise use partial or unreadable. missingFields must list important values that were expected but not found.`;
-  const geminiResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  const parts = [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: prompt }];
+  const requestGemini = (withSchema: boolean) => fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", responseSchema: extractionSchema, temperature: 0 },
+      contents: [{ role: "user", parts }],
+      generationConfig: withSchema
+        ? { responseMimeType: "application/json", responseSchema: extractionSchema, temperature: 0 }
+        : { responseMimeType: "application/json", temperature: 0 },
     }),
   });
-  if (!geminiResponse.ok) return json({ error: `Gemini OCR failed: ${await geminiResponse.text()}` }, 502);
+
+  let geminiResponse = await requestGemini(true);
+  let upstreamError = "";
+  if (!geminiResponse.ok) {
+    upstreamError = await geminiResponse.text();
+    console.error("Gemini structured request failed", { status: geminiResponse.status, details: upstreamError.slice(0, 1000) });
+    geminiResponse = await requestGemini(false);
+  }
+  if (!geminiResponse.ok) {
+    const fallbackError = await geminiResponse.text();
+    console.error("Gemini fallback request failed", { status: geminiResponse.status, details: fallbackError.slice(0, 1000) });
+    return json({ error: "Gemini OCR failed.", upstream_status: geminiResponse.status, details: fallbackError || upstreamError || "No upstream error body returned." }, 502);
+  }
   const gemini = await geminiResponse.json();
   const text = gemini.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
   if (!text) return json({ error: "Gemini returned no structured extraction." }, 502);
