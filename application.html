@@ -31,6 +31,13 @@
       <div id="doctype-blocks"><p style="color:var(--ink-soft);">Loading…</p></div>
     </div>
 
+    <div class="preview-modal" id="preview-modal" hidden>
+      <div class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+        <div class="preview-head"><strong id="preview-title">Document preview</strong><div style="display:flex; gap:8px;"><a id="preview-download" class="btn secondary" target="_blank" rel="noopener">Open/download</a><button id="preview-close" class="secondary">Close</button></div></div>
+        <div class="preview-body" id="preview-body"></div>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-head">
         <span class="eyebrow">Compliance</span>
@@ -142,6 +149,9 @@
       }
       container.innerHTML = types.map(typeBlockHtml).join("");
 
+      container.querySelectorAll("[data-action='preview']").forEach((button) => {
+        button.addEventListener("click", () => previewDocument(button.dataset.docId));
+      });
       for (const t of types) {
         const input = container.querySelector(`input[type=file][data-type-id="${t.id}"]`);
         if (input) input.addEventListener("change", (e) => uploadFiles(t, e.target.files));
@@ -173,11 +183,31 @@
             <div style="display:flex; align-items:center; gap:8px;">
               ${statusBadge}
               ${ex ? '<span class="badge accepted">processed</span>' : '<span class="badge warning">processing automatically</span>'}
+              <button class="secondary" style="padding:4px 10px; font-size:0.78rem;" data-action="preview" data-doc-id="${d.id}">Preview</button>
             </div>
           </div>
           <div id="extraction-slot-${d.id}"></div>
         </div>`;
     }
+
+    async function previewDocument(docId) {
+      const doc = documents.find((item) => item.id === docId);
+      if (!doc) return;
+      try {
+        const url = await getStorageProvider().getSignedUrl(doc.storage_path);
+        const modal = window.document.getElementById("preview-modal");
+        const body = window.document.getElementById("preview-body");
+        window.document.getElementById("preview-title").textContent = doc.file_name;
+        window.document.getElementById("preview-download").href = url;
+        if (doc.mime_type === "application/pdf") body.innerHTML = `<iframe title="${doc.file_name}" src="${url}"></iframe>`;
+        else if (doc.mime_type?.startsWith("image/")) body.innerHTML = `<img alt="${doc.file_name}" src="${url}" />`;
+        else body.innerHTML = `<div class="preview-fallback">Preview is not available for this file type. Use the button above to open or download the document.</div>`;
+        modal.hidden = false;
+      } catch (err) { showNotice("error", err.message || "Could not preview this document."); }
+    }
+
+    document.getElementById("preview-close").addEventListener("click", () => { document.getElementById("preview-modal").hidden = true; document.getElementById("preview-body").innerHTML = ""; });
+    document.getElementById("preview-modal").addEventListener("click", (event) => { if (event.target.id === "preview-modal") document.getElementById("preview-close").click(); });
 
     async function processDocument(docId, uploadedFile = null) {
       const document = documents.find((item) => item.id === docId);

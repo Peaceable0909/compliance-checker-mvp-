@@ -41,9 +41,9 @@
         </div>
         <div>
           <h3>Placement</h3>
-          <div class="field"><label for="app-country">Country</label><input id="app-country" placeholder="e.g. United Kingdom" /></div>
-          <div class="field"><label for="app-university">University</label><input id="app-university" placeholder="e.g. York St John University" /></div>
-          <div class="field"><label for="app-programme">Programme</label><input id="app-programme" placeholder="e.g. BSc Nursing" /></div>
+          <div class="field"><label for="app-country">Country</label><select id="app-country"><option value="">Select country</option></select></div>
+          <div class="field"><label for="app-university">University</label><select id="app-university" disabled><option value="">Select a country first</option></select></div>
+          <div class="field"><label for="app-programme">Programme</label><select id="app-programme" disabled><option value="">Select a university first</option></select></div>
           <div class="field"><label for="app-intake">Intake</label><input id="app-intake" placeholder="e.g. Jan 2027" /></div>
         </div>
       </div>
@@ -77,6 +77,7 @@
 
     async function init(userId) {
       await loadStudents(userId);
+      await loadReferenceData();
       await loadApplications(userId);
 
       if (new URLSearchParams(window.location.search).get("new") === "1") {
@@ -92,6 +93,8 @@
       document.getElementById("stu-existing").addEventListener("change", (e) => {
         document.getElementById("new-stu-fields").style.display = e.target.value ? "none" : "block";
       });
+      document.getElementById("app-country").addEventListener("change", populateUniversities);
+      document.getElementById("app-university").addEventListener("change", populateProgrammes);
       document.getElementById("create-app-btn").addEventListener("click", () => createApplication(userId));
     }
 
@@ -104,6 +107,37 @@
         opt.value = s.id; opt.textContent = s.full_name;
         sel.appendChild(opt);
       }
+    }
+
+    let countries = [], universities = [], programmes = [];
+
+    async function loadReferenceData() {
+      const [countryResult, universityResult, programmeResult] = await Promise.all([
+        supabase.from("countries").select("id, name").order("name"),
+        supabase.from("universities").select("id, name, country_id").order("name"),
+        supabase.from("programmes").select("id, name, university_id, level").order("name"),
+      ]);
+      const firstError = countryResult.error || universityResult.error || programmeResult.error;
+      if (firstError) { showNotice("error", firstError.message); return; }
+      countries = countryResult.data || []; universities = universityResult.data || []; programmes = programmeResult.data || [];
+      const countrySelect = document.getElementById("app-country");
+      countrySelect.innerHTML = `<option value="">Select country</option>` + countries.map((row) => `<option value="${row.id}">${escapeHtml(row.name)}</option>`).join("");
+    }
+
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" }[c])); }
+    function populateUniversities() {
+      const countryId = document.getElementById("app-country").value;
+      const universitySelect = document.getElementById("app-university");
+      const programmeSelect = document.getElementById("app-programme");
+      const filtered = universities.filter((row) => row.country_id === countryId);
+      universitySelect.disabled = !countryId; universitySelect.innerHTML = `<option value="">Select university</option>` + filtered.map((row) => `<option value="${row.id}">${escapeHtml(row.name)}</option>`).join("");
+      programmeSelect.disabled = true; programmeSelect.innerHTML = `<option value="">Select a university first</option>`;
+    }
+    function populateProgrammes() {
+      const universityId = document.getElementById("app-university").value;
+      const programmeSelect = document.getElementById("app-programme");
+      const filtered = programmes.filter((row) => row.university_id === universityId);
+      programmeSelect.disabled = !universityId; programmeSelect.innerHTML = `<option value="">Select programme</option>` + filtered.map((row) => `<option value="${row.id}">${escapeHtml(row.name)}${row.level ? ` · ${escapeHtml(row.level)}` : ""}</option>`).join("");
     }
 
     async function loadApplications(userId) {
@@ -166,13 +200,10 @@
           studentId = stu.id;
         }
 
-        const countryName = document.getElementById("app-country").value.trim();
-        const universityName = document.getElementById("app-university").value.trim();
-        const programmeName = document.getElementById("app-programme").value.trim();
-
-        const countryId = countryName ? await upsertLookup("countries", { name: countryName, owner_id: userId }) : null;
-        const universityId = universityName ? await upsertLookup("universities", { name: universityName, country_id: countryId, owner_id: userId }) : null;
-        const programmeId = programmeName ? await upsertLookup("programmes", { name: programmeName, university_id: universityId, owner_id: userId }) : null;
+        const countryId = document.getElementById("app-country").value || null;
+        const universityId = document.getElementById("app-university").value || null;
+        const programmeId = document.getElementById("app-programme").value || null;
+        if (!countryId || !universityId || !programmeId) { showNotice("error", "Select a country, university, and programme before creating the application."); return; }
 
         const { data: app, error: appErr } = await supabase.from("applications").insert({
           owner_id: userId,
@@ -191,19 +222,6 @@
       }
     }
 
-    // Look up an existing row by unique name (scoped by parent id where relevant)
-    // or insert it. Keeps countries/universities/programmes de-duplicated
-    // without needing a separate admin screen for the MVP.
-    async function upsertLookup(table, fields) {
-      let query = supabase.from(table).select("id").eq("name", fields.name);
-      if ("country_id" in fields) query = fields.country_id ? query.eq("country_id", fields.country_id) : query.is("country_id", null);
-      if ("university_id" in fields) query = fields.university_id ? query.eq("university_id", fields.university_id) : query.is("university_id", null);
-      const { data: existing } = await query.maybeSingle();
-      if (existing) return existing.id;
-      const { data: created, error } = await supabase.from(table).insert(fields).select("id").single();
-      if (error) throw error;
-      return created.id;
-    }
   </script>
 </body>
 </html>
