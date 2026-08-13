@@ -193,8 +193,16 @@
           const blob = await response.blob();
           file = new File([blob], document.file_name, { type: document.mime_type || blob.type || "application/octet-stream" });
         }
-        const docAI = getDocumentAIProvider();
-        const result = await docAI.extract({ file, document, documentType: type });
+        let result;
+        const isVisionDocument = document.mime_type === "application/pdf" || document.mime_type?.startsWith("image/");
+        if (isVisionDocument && window.APP_CONFIG.OCR_FUNCTION_NAME) {
+          const response = await supabase.functions.invoke(window.APP_CONFIG.OCR_FUNCTION_NAME, { body: { document_id: docId, document_type: type?.name || document.detected_document_type || "document" } });
+          if (response.error) throw response.error;
+          result = response.data;
+        } else {
+          const docAI = getDocumentAIProvider();
+          result = await docAI.extract({ file, document, documentType: type });
+        }
         const { error } = await supabase.from("document_extractions").insert({
           document_id: docId, provider: result.provider, model: result.model,
           extracted_data: result.extracted_data, confidence: result.confidence,
