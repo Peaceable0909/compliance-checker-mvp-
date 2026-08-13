@@ -93,7 +93,7 @@ Deno.serve(async (request: Request) => {
   const documentType = payload.document_type || document.detected_document_type || "the selected document type";
 
   const prompt = `You are extracting compliance evidence from a ${documentType}. Return only JSON matching the schema. Do not guess. Use empty or omitted fields when the value is not clearly visible. Normalize dates to YYYY-MM-DD where possible. Extract GPA, degree classification, IELTS overall and lowest band, TOEFL total, PTE total, bank balance, currency, statement date, and financial maintenance period when present. Set extractionStatus to complete only when the page is readable and the relevant evidence is clear; otherwise use partial or unreadable. missingFields must list important values that were expected but not found.`;
-  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent";
   const parts = [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: prompt }];
   const requestGemini = (withSchema: boolean) => fetch(endpoint, {
     method: "POST",
@@ -124,5 +124,5 @@ Deno.serve(async (request: Request) => {
   let extractedData: Record<string, unknown>;
   try { extractedData = JSON.parse(text); } catch { return json({ error: "Gemini returned invalid JSON." }, 502); }
 
-  return json({ provider: "gemini", model: "gemini-2.5-flash", extracted_data: { ...extractedData, extractedDocumentType: extractedData.extractedDocumentType || documentType }, confidence: null });
+  return json({ provider: "gemini", model: "gemini-3.6-flash", extracted_data: { ...extractedData, extractedDocumentType: extractedData.extractedDocumentType || documentType }, confidence: null });
 });
